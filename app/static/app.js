@@ -393,7 +393,7 @@ function renderPanel(rec, status) {
   const offers = $("#offers");
   offers.replaceChildren();
   const advice = rec?.offer_advice || [];
-  const mine = (rec?.offers || []).filter((o) => o.from_me);
+  const myOffers = (rec?.offers || []).filter((o) => o.from_me);
   const doneTrades = (rec?.trade_log || []).slice().reverse();
 
   advice.forEach((a) => {
@@ -412,7 +412,7 @@ function renderPanel(rec, status) {
     offers.appendChild(d);
   });
 
-  mine.forEach((o) => {
+  myOffers.forEach((o) => {
     const d = document.createElement("div");
     d.className = "offer live";
     d.innerHTML = `<span class="dot" style="background:var(--${o.from || "line"})"></span>
@@ -432,7 +432,7 @@ function renderPanel(rec, status) {
     offers.appendChild(d);
   });
   $("#offers-block").classList.toggle(
-    "hidden", !(advice.length || mine.length || doneTrades.length));
+    "hidden", !(advice.length || myOffers.length || doneTrades.length));
 
   // players: hand intel + production-by-roll
   const players = $("#players");
