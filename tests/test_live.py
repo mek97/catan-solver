@@ -318,3 +318,41 @@ def test_robber_is_only_offered_when_you_could_move_it():
     }
     maybe = robber_options(eng, cfg)
     assert maybe and all(o["needs_knight"] for o in maybe)
+
+
+# --- export / replay --------------------------------------------------------
+
+
+def test_export_round_trips_through_raw_frames(tmp_path):
+    """A bundle must reproduce the position without the original machine."""
+    import gzip
+    import json as _json
+
+    from app.live.export import build_export, load_export, replay_export
+
+    st = Store(tmp_path / "t.db")
+    payloads = list(frames())
+    for p in payloads:
+        st.add_frame(p, "recv", 2, "g1")
+    st.start_game("g1", "room", "red", [1, 2, 3, 4], {})
+
+    bundle = build_export(st, "g1", note="testing")
+    assert bundle["format"] >= 1 and bundle["note"] == "testing"
+    assert bundle["frames"], "raw frames are what make a bundle replayable"
+
+    path = tmp_path / "b.json.gz"
+    path.write_bytes(gzip.compress(_json.dumps(bundle).encode()))
+    reloaded = load_export(path)
+
+    live = replay()                      # engine built the normal way
+    from_bundle = replay_export(reloaded)  # engine built from the bundle
+    assert from_bundle.board_config().model_dump() == live.board_config().model_dump()
+    st.close()
+
+
+def test_export_reports_a_game_it_cannot_derive():
+    """Diffs with no snapshot is the mid-game-attach case; say so, don't crash."""
+    from app.live.export import replay_frames
+
+    engine = replay_frames([])
+    assert not engine.state

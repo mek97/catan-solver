@@ -77,6 +77,12 @@ main { display: flex; height: 100vh; }
   border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-size: 10px;
 }
 #live-toggle:hover { background: rgba(255,255,255,.22); }
+#export {
+  background: rgba(255,255,255,.1); color: var(--text); text-decoration: none;
+  border-radius: 999px; width: 22px; height: 22px; font-size: 11px;
+  display: grid; place-items: center;
+}
+#export:hover { background: rgba(255,255,255,.22); }
 
 #open-bar {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);

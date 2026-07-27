@@ -8,7 +8,7 @@ from typing import Optional
 
 import anthropic
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import board, parser, solver
@@ -249,6 +249,30 @@ def live_log(limit: int = 200) -> dict:
         "events": FEED.store.events(FEED.game_id, limit),
         "gaps": FEED.store.gaps(FEED.game_id),
     }
+
+
+@app.get("/api/live/export")
+def live_export(game_id: Optional[str] = None, note: str = "") -> Response:
+    """Download a replayable bundle of a game: raw frames + what we made of them."""
+    import gzip
+
+    from .live.export import build_export
+    from .live.feed import FEED
+
+    gid = game_id or FEED.game_id
+    if not gid:
+        row = FEED.store.latest_game()
+        gid = row["game_id"] if row else None
+    if not gid:
+        raise HTTPException(409, "no recorded game to export")
+
+    bundle = build_export(FEED.store, gid, note=note)
+    body = gzip.compress(json.dumps(bundle).encode())
+    return Response(
+        content=body,
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="catan-{gid}.json.gz"'},
+    )
 
 
 @app.post("/api/live/rebuild")
