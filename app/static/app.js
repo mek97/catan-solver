@@ -4,6 +4,7 @@
 
 const COLORS = ["red", "blue", "orange", "green"];
 const PIP_DOTS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
+const RES_ABBR = { wood: "🌲", brick: "🧱", sheep: "🐑", wheat: "🌾", ore: "⛰" };
 
 const state = { geometry: null, config: null, rec: null, myColor: null, on: true, timer: null };
 
@@ -161,26 +162,116 @@ function renderBoard() {
   drawHint(state.rec?.moves?.[0]);
 }
 
+/* Action-typed hints: each step of the recommended move is drawn as a ghost of
+   the piece you'd actually place, in your colour, pulsing. Multi-step moves
+   (trade → build, road building) are numbered in order. Non-spatial actions
+   (buy dev, bank trade, end turn) surface as a banner instead of on the board. */
+
+const STEP_LABEL = {
+  build_settlement: "place settlement",
+  setup_settlement: "place settlement",
+  build_city: "upgrade to city",
+  build_road: "place road",
+  setup_road: "place road",
+  play_road_building: "road building — 2 free roads",
+  buy_dev: "buy development card",
+  play_knight: "play knight → move robber",
+  play_year_of_plenty: "play year of plenty",
+  play_monopoly: "play monopoly",
+  trade_bank: "bank trade",
+  move_robber: "move robber",
+  end_turn: "end turn",
+};
+
+function ghostSettlement(v, cls) {
+  return el("path", { d: `M ${v.x - 11} ${v.y + 10} v -12 l 11 -10 l 11 10 v 12 z`, class: cls });
+}
+function ghostCity(v, cls) {
+  return el("path", { d: `M ${v.x - 15} ${v.y + 11} v -15 l 8 -7 l 8 7 v 5 h 14 v 10 z`, class: cls });
+}
+function stepBadge(x, y, n) {
+  const g = el("g", { class: "step-badge" });
+  g.appendChild(el("circle", { cx: x, cy: y, r: 9 }));
+  const t = el("text", { x, y: y + 3.5 });
+  t.textContent = n;
+  g.appendChild(t);
+  return g;
+}
+
 function drawHint(move) {
   const layer = $("#hints");
+  const banner = $("#hint-banner");
   if (!layer) return;
   layer.replaceChildren();
-  if (!move || !state.rec?.my_turn) return;
+  banner.replaceChildren();
+  banner.classList.add("hidden");
+  if (!move) return;
+
   const g = state.geometry;
+  const me = state.rec?.players?.find((p) => p.is_me)?.color || "red";
+  const spatial = [];   // steps drawn on the board
+  const abstract = [];  // steps shown in the banner
+
+  move.steps.forEach((step) => {
+    const has = step.vertex != null || step.edge != null
+      || (step.edges || []).length || step.robber_hex != null;
+    (has ? spatial : abstract).push(step);
+  });
+
+  let n = 0;
+  const numbered = move.steps.length > 1;
   for (const step of move.steps) {
+    n += 1;
+    const kind = step.type;
     if (step.vertex != null && g.vertices[step.vertex]) {
       const v = g.vertices[step.vertex];
-      layer.appendChild(el("circle", { cx: v.x, cy: v.y, r: 21, class: "halo" }));
-      layer.appendChild(el("circle", { cx: v.x, cy: v.y, r: 18 }));
+      layer.appendChild(el("circle", { cx: v.x, cy: v.y, r: 24, class: "halo" }));
+      const isCity = kind === "build_city";
+      layer.appendChild(isCity ? ghostCity(v, `ghost ${me}`) : ghostSettlement(v, `ghost ${me}`));
+      layer.appendChild(isCity ? ghostCity(v, "ghost-outline") : ghostSettlement(v, "ghost-outline"));
+      if (numbered) layer.appendChild(stepBadge(v.x + 20, v.y - 16, n));
     }
     for (const eid of [step.edge, ...(step.edges || [])]) {
       if (eid == null || !g.edges[eid]) continue;
       const e = g.edges[eid];
-      layer.appendChild(el("line", { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 }));
+      const x1 = e.x1 + (e.x2 - e.x1) * 0.16, y1 = e.y1 + (e.y2 - e.y1) * 0.16;
+      const x2 = e.x1 + (e.x2 - e.x1) * 0.84, y2 = e.y1 + (e.y2 - e.y1) * 0.84;
+      layer.appendChild(el("line", { x1, y1, x2, y2, class: `ghost-road ${me}` }));
+      layer.appendChild(el("line", { x1, y1, x2, y2, class: "ghost-road-outline" }));
+      if (numbered) layer.appendChild(stepBadge(e.mx, e.my, n));
     }
     if (step.robber_hex != null && g.hexes[step.robber_hex]) {
-      layer.appendChild(el("polygon", { points: g.hexes[step.robber_hex].points }));
+      const h = g.hexes[step.robber_hex];
+      layer.appendChild(el("polygon", { points: h.points, class: "robber-target" }));
+      layer.appendChild(el("polygon", { points: h.points, class: "robber-ring" }));
+      const r = el("g", { class: "ghost-robber" });
+      r.appendChild(el("ellipse", { cx: h.cx, cy: h.cy - 26, rx: 8, ry: 10 }));
+      r.appendChild(el("rect", { x: h.cx - 6, y: h.cy - 17, width: 12, height: 14, rx: 3 }));
+      layer.appendChild(r);
     }
+  }
+
+  // banner for actions with no board location, plus a caption for the rest
+  const parts = [];
+  for (const s of move.steps) {
+    let label = STEP_LABEL[s.type] || s.type;
+    if (s.type === "trade_bank" && s.give && s.get) {
+      const g1 = Object.entries(s.give).map(([r, c]) => `${c} ${r}`).join(", ");
+      const g2 = Object.entries(s.get).map(([r, c]) => `${c} ${r}`).join(", ");
+      label = `bank ${g1} → ${g2}`;
+    }
+    if (s.type === "play_monopoly" && s.resource) label = `monopoly on ${s.resource}`;
+    if (s.type === "play_year_of_plenty" && s.get) {
+      label = `year of plenty: take ${Object.keys(s.get).join(" + ")}`;
+    }
+    if (s.type === "move_robber" && s.steal_from) label += ` (steal ${s.steal_from})`;
+    parts.push(label);
+  }
+  if (parts.length && (abstract.length || parts.length > 1 || !spatial.length)) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = parts
+      .map((p, i) => `<span class="bstep">${parts.length > 1 ? `<b>${i + 1}</b>` : ""}${p}</span>`)
+      .join('<span class="barrow">→</span>');
   }
 }
 
@@ -237,34 +328,103 @@ function renderPanel(rec, status) {
   });
   $("#trades-block").classList.toggle("hidden", !(rec?.trades?.length));
 
+  // open offers
+  const offers = $("#offers");
+  offers.replaceChildren();
+  const openOffers = rec?.offers || [];
+  const doneTrades = (rec?.trade_log || []).slice().reverse();
+  openOffers.forEach((o) => {
+    const d = document.createElement("div");
+    d.className = "offer live";
+    d.innerHTML = `<span class="dot" style="background:var(--${o.from || "line"})"></span>
+      <span>${o.from ?? "?"} offers <b>${(o.offers || []).join(", ") || "?"}</b>
+      for <b>${(o.wants || []).join(", ") || "?"}</b></span>`;
+    offers.appendChild(d);
+  });
+  doneTrades.forEach((t) => {
+    const d = document.createElement("div");
+    d.className = "offer";
+    const j = (a) => (a || []).join(", ");
+    let txt;
+    if (t.kind === "trade_player") txt = `${t.color} → ${t.with}: gave ${j(t.gave)}, got ${j(t.got)}`;
+    else if (t.kind === "trade_bank") txt = `${t.color} banked ${j(t.gave)} → ${j(t.got)}`;
+    else txt = `${t.color} offered ${j(t.offers)} for ${j(t.wants)}`;
+    d.innerHTML = `<span class="dot" style="background:var(--${t.color || "line"})"></span><span>${txt}</span>`;
+    offers.appendChild(d);
+  });
+  $("#offers-block").classList.toggle("hidden", !(openOffers.length || doneTrades.length));
+
+  // players: hand intel + production-by-roll
   const players = $("#players");
   players.replaceChildren();
   (rec?.players || []).forEach((p) => {
-    const d = document.createElement("div");
-    d.className = `pl${p.is_me ? " me" : ""}`;
-    d.innerHTML = `<span class="dot" style="background:var(--${p.color})"></span>
-      <span class="nm">${p.color}${p.is_me ? " (you)" : ""}</span>
-      <span class="st">${p.vp_visible}vp · ${p.settlements}s ${p.cities}c ${p.roads}r · ${p.cards}🂠</span>`;
-    players.appendChild(d);
+    const card = document.createElement("div");
+    card.className = `pcard${p.is_me ? " me" : ""}`;
+    const known = Object.entries(p.hand?.known || {}).filter(([, n]) => n > 0);
+    const chips = known.map(([r, n]) => `<span class="chip ${r}">${n}${RES_ABBR[r]}</span>`).join("");
+    const unknown = p.hand?.unknown
+      ? `<span class="chip unk">${p.hand.unknown}?</span>` : "";
+    const prod = Object.entries(p.production || {})
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([num, res]) => {
+        const txt = Object.entries(res).map(([r, n]) => `${n > 1 ? n : ""}${RES_ABBR[r]}`).join("");
+        return `<span class="pnum${num === "6" || num === "8" ? " hot" : ""}">
+                  <b>${num}</b>${txt}</span>`;
+      }).join("");
+    card.innerHTML = `
+      <div class="phead">
+        <span class="dot" style="background:var(--${p.color})"></span>
+        <span class="nm">${p.color}${p.is_me ? " (you)" : ""}</span>
+        <span class="vp">${p.vp_visible} vp</span>
+      </div>
+      <div class="pstats">${p.settlements}🏠 ${p.cities}🏛 ${p.roads}🛣
+        · ${p.cards} cards · ${p.dev_cards} dev${p.dev_used ? ` (${p.dev_used} played)` : ""}</div>
+      <div class="chips">${chips}${unknown || (known.length ? "" : '<span class="chip unk">—</span>')}</div>
+      ${prod ? `<div class="prod">${prod}</div>` : ""}`;
+    players.appendChild(card);
   });
   $("#players-block").classList.toggle("hidden", !(rec?.players?.length));
+
+  // dice: recent rolls + distribution vs expected
+  const rollsEl = $("#rolls");
+  rollsEl.replaceChildren();
+  (rec?.rolls || []).slice(-18).forEach((n) => {
+    const s = document.createElement("span");
+    s.className = `roll-chip${n === 7 ? " seven" : ""}`;
+    s.textContent = n;
+    rollsEl.appendChild(s);
+  });
 
   const dice = $("#dice");
   dice.replaceChildren();
   if (rec?.dice?.rolls) {
-    const counts = rec.dice.counts;
-    const max = Math.max(1, ...Object.values(counts));
+    const { counts, expected } = rec.dice;
+    const max = Math.max(1, ...Object.values(counts), ...Object.values(expected || {}));
     for (let n = 2; n <= 12; n++) {
       const c = counts[String(n)] || 0;
+      const e = (expected || {})[String(n)] || 0;
       const b = document.createElement("div");
       b.className = "dbar";
-      b.title = `${n}: ${c} roll(s)`;
-      b.innerHTML = `<div class="bar${n === 6 || n === 8 ? " hot" : ""}" style="height:${
-        Math.round((c / max) * 30) + 2}px"></div><div class="lbl">${n}</div>`;
+      b.title = `${n}: rolled ${c}× (expected ${e})`;
+      b.innerHTML = `
+        <div class="stack">
+          <div class="exp" style="height:${Math.round((e / max) * 34)}px"></div>
+          <div class="bar${n === 7 ? " seven" : n === 6 || n === 8 ? " hot" : ""}"
+               style="height:${Math.round((c / max) * 34) + 2}px"></div>
+        </div><div class="lbl">${n}</div>`;
       dice.appendChild(b);
     }
+    $("#dice-sub").textContent = `${rec.dice.rolls} rolls · cold ${rec.dice.coldest.join(",")}`;
   }
   $("#dice-block").classList.toggle("hidden", !rec?.dice?.rolls);
+
+  // turn timer
+  const t = $("#timer");
+  if (rec?.timer) {
+    const left = Math.max(0, rec.timer.remaining);
+    t.textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
+    t.className = left <= 10 ? "urgent" : "";
+  } else t.textContent = "";
 }
 
 function renderLog(events) {

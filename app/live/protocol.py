@@ -44,6 +44,13 @@ def map_color(color_id: Any) -> Optional[str]:
 BUILDING = {1: "settlement", 2: "city"}
 PIECE = {0: "road", 2: "settlement", 3: "city", 5: "robber"}
 
+# portEdgeStates .type: 1 is the generic 3:1 (four of them on a standard board);
+# 2..6 are the resource 2:1 ports, offset by one from the resource enum.
+def port_type(t: Any) -> Optional[str]:
+    if t == 1:
+        return "3:1"
+    return CARD.get((t or 0) - 1)
+
 # message envelope types (data.type)
 MSG_GAME_SNAPSHOT = 4      # full gameState
 MSG_GAME_DIFF = 91         # partial state diff (the move stream)

@@ -16,6 +16,8 @@
         <button id="live-toggle" title="pause / resume polling">⏸</button>
       </div>
 
+      <div id="hint-banner" class="hidden"></div>
+
       <form id="open-bar" autocomplete="off">
         <input id="open-url" type="text" spellcheck="false"
                placeholder="paste a colonist.io game link and press ↵" />
@@ -25,7 +27,10 @@
 
     <aside id="panel">
       <header id="turn-bar">
-        <div id="turn-label">waiting for a game</div>
+        <div class="turn-row">
+          <div id="turn-label">waiting for a game</div>
+          <div id="timer"></div>
+        </div>
         <div id="turn-sub"></div>
       </header>
 
@@ -37,8 +42,13 @@
       </section>
 
       <section class="block" id="trades-block">
-        <h2>Trades &amp; warnings</h2>
+        <h2>Trade advice</h2>
         <div id="trades"></div>
+      </section>
+
+      <section class="block" id="offers-block">
+        <h2>Trades on the table</h2>
+        <div id="offers"></div>
       </section>
 
       <section class="block" id="players-block">
@@ -47,7 +57,8 @@
       </section>
 
       <section class="block" id="dice-block">
-        <h2>Dice</h2>
+        <h2>Dice <span id="dice-sub"></span></h2>
+        <div id="rolls"></div>
         <div id="dice"></div>
       </section>
 

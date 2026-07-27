@@ -117,9 +117,16 @@ def dice_stats(eng: GameEngine) -> dict[str, Any]:
     return {
         "rolls": n,
         "counts": {str(k): counts.get(k, 0) for k in range(2, 13)},
+        "expected": {str(k): round(expected[k], 1) for k in range(2, 13)},
         "coldest": cold[:3],
         "hottest": cold[-3:][::-1],
     }
+
+
+def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
+    """Completed trades and offers, newest last."""
+    kinds = ("trade_player", "trade_bank", "trade_offered")
+    return [e for e in eng.events if e.get("kind") in kinds][-limit:]
 
 
 def recommend(eng: GameEngine) -> dict[str, Any]:
@@ -135,4 +142,8 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "trades": trade_advice(eng, cfg),
         "dice": dice_stats(eng),
         "players": eng.player_summary(),
+        "timer": eng.turn_timer(),
+        "offers": eng.trade_offers(),
+        "trade_log": recent_trades(eng),
+        "rolls": eng.dice_history()[-24:],
     }

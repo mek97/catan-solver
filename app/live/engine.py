@@ -8,6 +8,7 @@ that is what makes recovery after a dropped connection trivial.
 """
 from __future__ import annotations
 
+import time
 from collections import Counter
 from typing import Any, Optional
 
@@ -91,14 +92,108 @@ class GameEngine:
 
     def robber_hex(self) -> int:
         rob = self.state.get("mechanicRobberState") or {}
-        for key in ("hexIndex", "tileIndex", "hex", "tile"):
-            if key in rob:
-                return self.maps["hexes"].get(str(rob[key]), 0)
+        idx = rob.get("locationTileIndex")
+        if idx is not None:
+            mapped = self.maps["hexes"].get(str(idx))
+            if mapped is not None:
+                return mapped
         # fall back to the desert
         for hid, h in (self.state.get("mapState", {}).get("tileHexStates") or {}).items():
             if h.get("type") == 0:
                 return self.maps["hexes"].get(str(hid), 0)
         return 0
+
+    def turn_timer(self) -> Optional[dict[str, Any]]:
+        """Seconds left in the current action, from startTime + allocatedTime."""
+        cs = self.state.get("currentState") or {}
+        start, allocated = cs.get("startTime"), cs.get("allocatedTime")
+        if not start or not allocated:
+            return None
+        elapsed = time.time() - (start / 1000.0)
+        return {
+            "allocated": allocated,
+            "remaining": max(0.0, round(allocated - elapsed, 1)),
+        }
+
+    def ports(self) -> list[Port]:
+        """Real port positions from portEdgeStates (not inferred from ratios)."""
+        out: list[Port] = []
+        for _pid, p in (self.state.get("mapState", {}).get("portEdgeStates") or {}).items():
+            ptype = P.port_type(p.get("type"))
+            eid = P.edge_to_canonical(p)
+            if ptype is None or eid is None:
+                continue
+            a, b = board.EDGE_VERTICES[eid]
+            out.append(Port(type=ptype, vertices=[a, b]))  # type: ignore[arg-type]
+        return out
+
+    def dev_cards_used(self) -> dict[str, int]:
+        """Knights/dev cards each player has *played* — public information."""
+        out: dict[str, int] = {}
+        dev = (self.state.get("mechanicDevelopmentCardsState") or {}).get("players") or {}
+        for cid, ps in dev.items():
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
+            if color:
+                out[color] = len(ps.get("developmentCardsUsed") or [])
+        return out
+
+    def dev_card_counts(self) -> dict[str, int]:
+        """How many dev cards each player holds (composition is hidden)."""
+        out: dict[str, int] = {}
+        dev = (self.state.get("mechanicDevelopmentCardsState") or {}).get("players") or {}
+        for cid, ps in dev.items():
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
+            if color:
+                out[color] = len((ps.get("developmentCards") or {}).get("cards") or [])
+        return out
+
+    def production_table(self) -> dict[str, dict[str, dict[str, int]]]:
+        """Per player: which dice number pays them what, and how much.
+
+        {color: {"6": {"wood": 2}, "9": {"ore": 1}, ...}} — a city counts twice.
+        The robber's hex is excluded, since it pays nobody.
+        """
+        ms = self.state.get("mapState") or {}
+        corners = ms.get("tileCornerStates") or {}
+        hexes = ms.get("tileHexStates") or {}
+        robber = (self.state.get("mechanicRobberState") or {}).get("locationTileIndex")
+        out: dict[str, dict[str, dict[str, int]]] = {}
+        for cid_, c in corners.items():
+            if not isinstance(c, dict) or not c.get("owner"):
+                continue
+            color = P.map_color(c["owner"])
+            vid = self.maps["corners"].get(str(cid_))
+            if not color or vid is None:
+                continue
+            weight = 2 if c.get("buildingType") == 2 else 1
+            for hid, h in hexes.items():
+                if self.maps["hexes"].get(str(hid)) not in board.VERTEX_HEXES[vid]:
+                    continue
+                if str(hid) == str(robber):
+                    continue
+                res, num = P.RESOURCE.get(h.get("type")), h.get("diceNumber")
+                if not num or res in (None, "desert"):
+                    continue
+                slot = out.setdefault(color, {}).setdefault(str(num), {})
+                slot[res] = slot.get(res, 0) + weight
+        return out
+
+    def trade_offers(self) -> list[dict[str, Any]]:
+        """Open trade offers on the table right now."""
+        offers = (self.state.get("tradeState") or {}).get("activeOffers") or {}
+        out = []
+        for oid, o in offers.items():
+            if not isinstance(o, dict):
+                continue
+            out.append(
+                {
+                    "id": oid,
+                    "from": P.map_color(o.get("creator") or o.get("playerColor")),
+                    "offers": [P.CARD.get(c, c) for c in (o.get("offeredResources") or o.get("offeredCardEnums") or [])],
+                    "wants": [P.CARD.get(c, c) for c in (o.get("wantedResources") or o.get("wantedCardEnums") or [])],
+                }
+            )
+        return out
 
     def bank_ratios(self) -> dict[str, int]:
         ps = (self.state.get("playerStates") or {}).get(str(self.my_color_id)) or {}
@@ -116,6 +211,11 @@ class GameEngine:
         return hand
 
     def player_summary(self) -> list[dict]:
+        from .tracker import build_tracker
+
+        tracker = build_tracker(self.events, P.PALETTE)
+        dev_counts, dev_used = self.dev_card_counts(), self.dev_cards_used()
+        production = self.production_table()
         out = []
         corners = self.state.get("mapState", {}).get("tileCornerStates") or {}
         edges = self.state.get("mapState", {}).get("tileEdgeStates") or {}
@@ -138,15 +238,26 @@ class GameEngine:
                 if isinstance(e, dict) and e.get("owner") == colid
             )
             cards = (ps.get("resourceCards") or {}).get("cards") or []
+            color = P.map_color(colid) or str(colid)
+            is_me = colid == self.my_color_id
+            intel = (
+                {"count": len(cards), "known": self.my_hand(), "unknown": 0}
+                if is_me
+                else tracker.intel(color, len(cards))
+            )
             out.append(
                 {
-                    "color": P.map_color(colid) or str(colid),
-                    "is_me": colid == self.my_color_id,
+                    "color": color,
+                    "is_me": is_me,
                     "vp_visible": sum(v for v in vps.values() if isinstance(v, int)),
                     "settlements": settlements,
                     "cities": cities,
                     "roads": roads,
                     "cards": len(cards),
+                    "hand": intel,
+                    "dev_cards": dev_counts.get(color, 0),
+                    "dev_used": dev_used.get(color, 0),
+                    "production": production.get(color, {}),
                 }
             )
         return out
@@ -211,11 +322,7 @@ class GameEngine:
                 if isinstance(v.get("knightsPlayed"), int):
                     players[color].knights_played = v["knightsPlayed"]
 
-        # ports: derive from our own bank ratios (colonist reports them per player)
-        ports: list[Port] = []
-        for res, ratio in self.bank_ratios().items():
-            if ratio == 2:
-                ports.append(Port(type=res, vertices=[0, 1]))  # ratio known, location not
+        ports = self.ports()
         # only advise on the robber when it is actually ours to move
         pending = "move_robber" if (self.action_state() == 4 and self.is_my_turn()) else None
 
