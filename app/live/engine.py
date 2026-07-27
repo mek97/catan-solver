@@ -324,7 +324,11 @@ class GameEngine:
 
         ports = self.ports()
         # only advise on the robber when it is actually ours to move
-        pending = "move_robber" if (self.action_state() == 4 and self.is_my_turn()) else None
+        pending = (
+            "move_robber"
+            if (self.action_state() == P.ACTION_MOVE_ROBBER and self.is_my_turn())
+            else None
+        )
 
         return BoardConfig(
             hexes=hexes,

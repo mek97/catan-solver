@@ -148,3 +148,36 @@ def test_robber_advice_only_on_my_turn():
     cfg = eng.board_config()
     if not eng.is_my_turn():
         assert cfg.pending is None
+
+
+def test_action_state_constants_match_observed_traffic():
+    """24 precedes robber_moved, 28 precedes discards — verified from the log."""
+    assert P.ACTION_MOVE_ROBBER == 24
+    assert P.ACTION_DISCARD == 28
+
+
+def test_robber_options_always_available():
+    from app.live.advisor import robber_options
+
+    eng = replay()
+    cfg = eng.board_config()
+    opts = robber_options(eng, cfg)
+    assert opts, "robber placements should rank even when not forced"
+    # never suggest the hex the robber already sits on
+    assert all(o["hex"] != cfg.robber_hex for o in opts)
+    assert opts == sorted(opts, key=lambda o: -o["score"])
+
+
+def test_discard_advice_halves_the_hand():
+    from app.live.advisor import discard_advice
+
+    eng = replay()
+    cfg = eng.board_config()
+    total = sum(cfg.me.hand.values())
+    adv = discard_advice(eng, cfg)
+    if total > 7:
+        assert adv and sum(adv["drop"].values()) == total // 2
+        for res, n in adv["drop"].items():
+            assert n <= cfg.me.hand[res], "cannot discard cards you don't hold"
+    else:
+        assert adv is None

@@ -305,6 +305,30 @@ function renderPanel(rec, status) {
     best.innerHTML = `<div class="best-empty">No recommendation yet.</div>`;
   }
 
+  // discard (7 rolled and you're over the limit)
+  const dis = $("#discard");
+  if (rec?.discard) {
+    dis.innerHTML = `<div class="urgent-text"></div>`;
+    dis.querySelector(".urgent-text").textContent = rec.discard.text;
+    $("#discard-block").classList.remove("hidden");
+  } else $("#discard-block").classList.add("hidden");
+
+  // robber placements — always ranked, highlighted on hover
+  const rob = $("#robber");
+  rob.replaceChildren();
+  (rec?.robber || []).forEach((r, i) => {
+    const d = document.createElement("div");
+    d.className = `rob${i === 0 ? " top" : ""}`;
+    d.innerHTML = `<span class="score">${r.score.toFixed(1)}</span><span class="txt"></span>`;
+    d.querySelector(".txt").textContent = r.text;
+    const fake = { steps: [{ type: "move_robber", robber_hex: r.hex, steal_from: r.steal_from }] };
+    d.addEventListener("mouseenter", () => drawHint(fake));
+    d.addEventListener("mouseleave", () => drawHint(rec.moves?.[0]));
+    rob.appendChild(d);
+  });
+  $("#robber-sub").textContent = rec?.pending === "move_robber" ? "— move it now" : "if you play a knight";
+  $("#robber-block").classList.toggle("hidden", !(rec?.robber?.length));
+
   const alts = $("#alts");
   alts.replaceChildren();
   (rec?.moves || []).slice(1, 6).forEach((m) => {

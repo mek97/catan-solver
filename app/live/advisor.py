@@ -7,7 +7,7 @@ trades to propose or accept, discard advice at a 7, and dice-tracker colour.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import Any, Optional
 
 from .. import board, solver
 from ..models import RESOURCES, BoardConfig, ScoredMove
@@ -129,10 +129,75 @@ def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
     return [e for e in eng.events if e.get("kind") in kinds][-limit:]
 
 
+def discard_advice(eng: GameEngine, cfg: BoardConfig) -> Optional[dict[str, Any]]:
+    """On a 7, which cards to throw away: keep what completes the best build."""
+    hand = cfg.me.hand
+    total = sum(hand.values())
+    if total <= cfg.players[cfg.me.color].__dict__.get("discard_limit", 7):
+        return None
+    to_drop = total // 2
+    ctx = solver.build_ctx(cfg)
+    # value each card: what it costs to replace (rarity for me) + build usefulness
+    need: Counter[str] = Counter()
+    for name in ("city", "settlement", "road", "dev"):
+        for r, n in COSTS[name].items():
+            need[r] = max(need[r], n)
+    keep_rank = sorted(
+        RESOURCES,
+        key=lambda r: (need[r] > 0, -ctx.my_pips.get(r, 0.0)),
+        reverse=True,
+    )
+    drop: Counter[str] = Counter()
+    left = to_drop
+    for r in reversed(keep_rank):  # discard the least useful first
+        if left <= 0:
+            break
+        spare = max(0, hand.get(r, 0) - (need[r] if hand.get(r, 0) >= need[r] else 0))
+        take = min(left, spare if spare else hand.get(r, 0))
+        if take:
+            drop[r] += take
+            left -= take
+    for r in reversed(keep_rank):  # still short: take from anything left
+        if left <= 0:
+            break
+        take = min(left, hand.get(r, 0) - drop[r])
+        if take > 0:
+            drop[r] += take
+            left -= take
+    return {
+        "must_discard": to_drop,
+        "drop": dict(drop),
+        "text": f"Discard {to_drop}: " + ", ".join(f"{n} {r}" for r, n in drop.items()),
+    }
+
+
+def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[dict[str, Any]]:
+    """Best robber placements, ranked — available whether or not it's forced.
+
+    Useful ahead of time too: it tells you what a knight in hand is worth.
+    """
+    ctx = solver.build_ctx(cfg)
+    out = []
+    for m in solver._robber_moves(ctx)[:limit]:
+        step = m.steps[0]
+        out.append(
+            {
+                "hex": step.robber_hex,
+                "steal_from": step.steal_from,
+                "score": round(m.score, 1),
+                "text": m.location_hint,
+                "why": m.reasoning,
+            }
+        )
+    return out
+
+
 def recommend(eng: GameEngine) -> dict[str, Any]:
     cfg = eng.board_config()
     moves: list[ScoredMove] = solver.solve(cfg)
     return {
+        "discard": discard_advice(eng, cfg),
+        "robber": robber_options(eng, cfg),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),
         "phase": cfg.phase,

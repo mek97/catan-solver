@@ -56,6 +56,16 @@ MSG_GAME_SNAPSHOT = 4      # full gameState
 MSG_GAME_DIFF = 91         # partial state diff (the move stream)
 MSG_ROOM_STATE = "stateUpdated"
 
+# currentState.actionState — what the active player is being asked to do.
+# Established by correlating the value with the log events that follow it:
+# 24 always precedes a robber_moved, 28 precedes cards_discarded on a 7.
+ACTION_IDLE = 0
+ACTION_TURN = 1
+ACTION_SETUP_PLACE = 3
+ACTION_BUY_DEV = 4
+ACTION_MOVE_ROBBER = 24
+ACTION_DISCARD = 28
+
 # gameLogState text types -> semantic event kind
 LOG = {
     1: "turn_started",

@@ -209,6 +209,16 @@ main { display: flex; height: 100vh; }
 .alt .score { color: var(--dim); font: 600 11px ui-monospace, monospace; min-width: 30px; }
 .alt .txt { font-size: 12.5px; }
 
+.urgent-block { background: rgba(226, 104, 95, 0.12); }
+.urgent-block h2 { color: var(--bad); }
+.urgent-text { font-size: 14px; font-weight: 700; color: #f3a49d; }
+
+.rob { display: flex; gap: 9px; align-items: baseline; padding: 5px 0; font-size: 12.5px; }
+.rob .score { color: var(--dim); font: 600 11px ui-monospace, monospace; min-width: 30px; }
+.rob.top .txt { color: var(--text); font-weight: 600; }
+.rob:hover .txt { color: var(--accent); }
+#robber-sub { color: var(--dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
 .tip { font-size: 12.5px; padding: 6px 0 6px 10px; border-left: 2px solid var(--line); margin-bottom: 6px; }
 .tip.want { border-color: var(--good); }
 .tip.leverage { border-color: var(--accent); }
