@@ -29,12 +29,21 @@ class GameEngine:
 
     # --- ingest -------------------------------------------------------------
 
-    def apply_snapshot(self, payload: dict) -> None:
+    def apply_snapshot(self, payload: Any) -> bool:
+        """Adopt a full game snapshot. Returns False if this isn't one.
+
+        Message type 4 is reused in the lobby with a completely different
+        (list) payload, so the shape has to be checked rather than assumed --
+        blindly indexing it crashes the feed and loses the game.
+        """
+        if not isinstance(payload, dict) or not isinstance(payload.get("gameState"), dict):
+            return False
         self.state = payload["gameState"]
         self.my_color_id = payload.get("playerColor")
         self.play_order = payload.get("playOrder", [])
         self.maps = P.build_maps(self.state.get("mapState", {}))
         self.applied = 1
+        return True
 
     def apply_diff(self, diff: dict) -> list[dict]:
         """Merge one diff; returns the semantic events it contained."""

@@ -255,3 +255,37 @@ def test_trade_proposals_are_scored_and_ranked():
         assert "score" in p and p["give"] and p["get"]
         assert set(p["give"]) & set(cfg.me.hand), "must offer something we hold"
     assert props == sorted(props, key=lambda p: -p["score"])
+
+
+def test_port_ratio_derivation_is_correct_for_every_port():
+    """Settling on a port must yield the right ratio from geometry alone.
+
+    No recorded game has a player on a port, so this is the only coverage the
+    geometric path has; without it we'd be trusting untested code whenever
+    colonist's authoritative ratios are unavailable (e.g. hand-entered boards).
+    """
+    from app import solver
+
+    eng = replay()
+    cfg = eng.board_config()
+    assert cfg.ports, "live board should expose real ports"
+    for port in cfg.ports:
+        probe = cfg.model_copy(deep=True)
+        probe.me.bank_rates = None  # force the geometric path
+        for p in probe.players.values():
+            p.settlements = [v for v in p.settlements if v not in port.vertices]
+            p.cities = [v for v in p.cities if v not in port.vertices]
+        probe.players[probe.me.color].settlements.append(port.vertices[0])
+        rates = solver.build_ctx(probe).rates
+        if port.type == "3:1":
+            assert all(rates[r] <= 3 for r in rates)
+        else:
+            assert rates[port.type] == 2, f"{port.type} port did not give a 2:1"
+
+
+def test_lobby_message_reusing_type_4_is_not_a_snapshot():
+    """type 4 appears in the lobby with a list payload; adopting it crashes."""
+    eng = GameEngine()
+    assert eng.apply_snapshot([{"id": 1}]) is False
+    assert eng.apply_snapshot({"payload": "nope"}) is False
+    assert eng.state == {}

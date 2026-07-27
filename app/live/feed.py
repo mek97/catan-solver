@@ -105,7 +105,8 @@ class LiveFeed:
 
         if data.get("type") == P.MSG_GAME_SNAPSHOT:
             payload = data.get("payload") or {}
-            self.engine.apply_snapshot(payload)
+            if not self.engine.apply_snapshot(payload):
+                return  # a lobby message reusing type 4, not a game snapshot
             self.game_id = f"{self.room_id or 'game'}-{int(time.time())}"
             self.store.start_game(
                 self.game_id,
