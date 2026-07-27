@@ -1,57 +1,33 @@
 # catan-solver
 
-Personal Catan assistant for [colonist.io](https://colonist.io): drop a
-screenshot of the board, get a parsed + editable board state, and a ranked
-list of recommended moves with reasoning. Pair it with Claude Code + the
-Claude-in-Chrome extension to have the moves clicked for you (see
-`CLAUDE.md`).
+Live advisor for [colonist.io](https://colonist.io). It reads the game's own
+websocket over the Chrome DevTools Protocol, reconstructs the position, and
+ranks what to do next — placements, bank and player trades, dev cards, the
+robber — with the reasoning shown.
+
+Advisory only: it never clicks anything in the game. You play; it advises.
 
 ## Quick start
 
 ```bash
-uv sync
-uv run uvicorn app.main:app --reload --port 8017
-# open http://localhost:8017
+./start.sh
 ```
 
-Screenshot parsing has two interchangeable vision backends:
+That's the whole thing. It launches Chrome on a dedicated profile with the
+remote-debugging port open, starts the server, attaches the live feed, and
+opens the dashboard.
 
-- **Claude** (preferred, fastest) — needs Anthropic API credentials:
-  `ANTHROPIC_API_KEY` in the environment or in a gitignored `.env` at the
-  repo root, or an `ant auth login` profile.
-- **Codex CLI** (automatic fallback) — uses a locally authenticated `codex`
-  CLI (ChatGPT plan, no API key). Slower (~30–90s) but zero setup if you
-  already use Codex.
+**Play in the Chrome window it opens** — that's the one the feed can read.
+Paste a game link into the bar under the board, or just start a game from
+colonist's lobby; the dashboard follows either way.
 
-Auto mode tries Claude and falls back to Codex; force one with
-`POST /api/parse?backend=claude|codex`. With neither available everything
-else still works — enter the board by hand in the editor.
+```bash
+./start.sh --no-browser     # Chrome already running on :9222
+PORT=9000 ./start.sh        # different port
+```
 
-## Flow
-
-1. **Screenshot** — drag a colonist.io screenshot into the panel (or paste it
-   with ⌘V). One Claude vision call turns it into a board config. The model
-   only ever references hexes by row/position and pieces by hex + compass
-   direction; the backend resolves those to canonical IDs, so a misread is a
-   two-click fix, never a corrupted board.
-2. **Review** — the parsed board renders as an editable SVG. Modes: click a
-   hex to change resource/number, click vertices/edges to place settlements,
-   cities, and roads per color, move the robber. Fill in your hand + the
-   player panels.
-3. **Solve** — ranked moves with score, plain-English reasoning, and a
-   `location_hint` phrased so a human (or Claude driving Chrome) can find the
-   spot on screen ("settle the corner touching 8-wood, 6-brick, 11-sheep").
-   Hovering a result pulses the referenced spots on the board.
-
-## What the solver is
-
-A single-turn heuristic evaluator (`app/solver.py`) — not MCTS. It enumerates
-legal moves (builds, dev-card plays, bank/port trades, robber placement,
-setup placements), scores them on production pips weighted by scarcity and
-resource diversity, port synergy, expansion room, blocking, and the VP race,
-and composes greedy combos (trade→build, build chains, Year-of-Plenty→build).
-It's an advisor with a human in the loop: usually sensible, always
-explainable. All weights live in `solver.W`.
+Nothing needs starting in a particular order: the feed retries until Chrome
+appears, so launching them in either order works.
 
 ## Live mode (colonist websocket via CDP)
 
@@ -59,17 +35,18 @@ Advisory only — the app never clicks in the game. It reads colonist's own
 websocket, so there's no screenshotting, no vision error, and millisecond
 latency.
 
+`./start.sh` sets this up for you. To do it by hand:
+
 ```bash
-# 1. Chrome with the debug port (separate profile)
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-catan-profile" \
   https://colonist.io
-
-# 2. In the dashboard, hit Connect under "Live feed" (or POST /api/live/start)
+uv run uvicorn app.main:app --port 8017
 ```
 
-The board, ranked moves, trade advice, dice tracker, and move log then refresh
-every 2s as the real game progresses.
+The feed attaches when the server boots, so there is no connect step. The
+board, ranked moves, trade advice, dice tracker, and move log refresh every 2s
+as the real game progresses.
 
 **How it works.** colonist speaks msgpack over
 `wss://socket.svr.colonist.io/?version=2`. A `type: 4` frame carries the full
@@ -114,20 +91,25 @@ app/board.py      canonical geometry: 19 hexes / 54 vertices / 72 edges + adjace
 app/models.py     BoardConfig schema (the parser ⇄ editor ⇄ solver contract)
 app/solver.py     move enumeration + scoring + reasoning
 app/parser.py     screenshot → config (Claude vision, structured output)
-app/main.py       FastAPI: /api/geometry /api/config /api/parse /api/solve
-app/static/       vanilla-JS SVG board editor
-scripts/          fixture generator (beginner board layout)
+app/rules.py      base-game rules in one place (costs, supplies, deck, limits)
+app/main.py       FastAPI: geometry, config, parse, solve, live/*
+app/static/       vanilla-JS board + action console
 app/live/         colonist websocket: protocol, store, state engine, advisor
-tests/            geometry invariants, schema validation, solver, live replay
+scripts/          fixture generator (beginner board layout)
+start.sh          launcher: Chrome + server + dashboard
+tests/            geometry, schema, solver, live replay, base-game rules
 ```
 
 `uv run pytest` runs the suite.
 
-## Ports
+## Rules
 
-The default fixture places the 9 ports on evenly spaced coastal edges — close
-to, but not exactly, the rulebook layout. Fix port positions for a real game
-via the Raw JSON tab (each port is `{"type": ..., "vertices": [a, b]}`).
+`app/rules.py` holds the base-game constants — tile and token distributions,
+build costs, piece supplies, the 25-card development deck, victory thresholds,
+the 2d6 table. `tests/test_rules.py` asserts conformance rather than trusting
+the code. Where colonist reports a value authoritatively (piece supplies,
+longest road, bank stock, discard limit) the live feed uses that, and the
+derivations here are the fallback for hand-entered boards.
 
 ## Fair play
 

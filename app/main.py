@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -27,7 +28,24 @@ if _env_file.exists():
             _k, _, _v = _line.partition("=")
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-app = FastAPI(title="catan-solver")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Attach the live feed as soon as the server boots.
+
+    The feed retries on its own if Chrome isn't up yet, so starting it here is
+    safe in any order: launch the browser first or second, it connects either
+    way, and the dashboard never has to ask.
+    """
+    from .live.feed import FEED
+
+    FEED.start()
+    try:
+        yield
+    finally:
+        FEED.stop()
+
+
+app = FastAPI(title="catan-solver", lifespan=lifespan)
 
 LAST_CONFIG: Optional[BoardConfig] = None
 
