@@ -137,6 +137,23 @@ class GameEngine:
                 out[color] = len(ps.get("developmentCardsUsed") or [])
         return out
 
+    def my_dev_cards(self) -> dict[str, Any]:
+        """Our own dev cards. colonist masks the enum as 10 when hidden, so we
+        report a count always and a composition only when it's actually legible."""
+        dev = (self.state.get("mechanicDevelopmentCardsState") or {}).get("players") or {}
+        mine = dev.get(str(self.my_color_id)) or {}
+        cards = (mine.get("developmentCards") or {}).get("cards") or []
+        known = Counter(
+            P.DEV_CARD[c] for c in cards if c in P.DEV_CARD
+        )
+        return {
+            "count": len(cards),
+            "known": dict(known),
+            "hidden": sum(1 for c in cards if c not in P.DEV_CARD),
+            "used": len(mine.get("developmentCardsUsed") or []),
+            "bought_this_turn": bool(mine.get("developmentCardsBoughtThisTurn")),
+        }
+
     def dev_card_counts(self) -> dict[str, int]:
         """How many dev cards each player holds (composition is hidden)."""
         out: dict[str, int] = {}
@@ -349,7 +366,11 @@ class GameEngine:
             me=MyState(
                 color=self.my_color,  # type: ignore[arg-type]
                 hand=self.my_hand(),
-                dev_cards=DevCards(),
+                dev_cards=DevCards(**{
+                    k: v for k, v in self.my_dev_cards()["known"].items()
+                    if k in DevCards.model_fields
+                }),
+                dev_card_bought_this_turn=self.my_dev_cards()["bought_this_turn"],
             ),
             phase=self.phase(),  # type: ignore[arg-type]
             turn=self.current_turn(),  # type: ignore[arg-type]

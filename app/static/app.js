@@ -313,6 +313,43 @@ function renderPanel(rec, status) {
     $("#discard-block").classList.remove("hidden");
   } else $("#discard-block").classList.add("hidden");
 
+  // dev cards: what each would do, with the follow-up action
+  const dev = $("#devplays");
+  dev.replaceChildren();
+  (rec?.dev_plays || []).forEach((d) => {
+    const row = document.createElement("div");
+    row.className = `dev${d.certain ? "" : " maybe"}`;
+    row.innerHTML = `
+      <div class="dhead">
+        <span class="score">${d.score.toFixed(1)}</span>
+        <span class="dname">${d.label}${d.held ? ` ×${d.held}` : ""}</span>
+        ${d.certain ? "" : '<span class="tagq">if held</span>'}
+        ${d.blocked ? '<span class="tagq blk">bought this turn</span>' : ""}
+      </div>
+      <div class="daction"></div>`;
+    row.querySelector(".daction").textContent = d.action;
+    const fake = { steps: d.steps };
+    row.addEventListener("mouseenter", () => drawHint(fake));
+    row.addEventListener("mouseleave", () => drawHint(rec.moves?.[0]));
+    dev.appendChild(row);
+  });
+  const md = rec?.my_dev;
+  $("#dev-sub").textContent = md?.count
+    ? `${md.count} held${md.hidden ? " (hidden)" : ""}${md.used ? ` · ${md.used} played` : ""}`
+    : "";
+  $("#dev-block").classList.toggle("hidden", !(rec?.dev_plays?.length));
+
+  // trades to propose
+  const props = $("#proposals");
+  props.replaceChildren();
+  (rec?.proposals || []).forEach((p) => {
+    const d = document.createElement("div");
+    d.className = "tip want";
+    d.textContent = p.text;
+    props.appendChild(d);
+  });
+  $("#propose-block").classList.toggle("hidden", !(rec?.proposals?.length));
+
   // robber placements — always ranked, highlighted on hover
   const rob = $("#robber");
   rob.replaceChildren();

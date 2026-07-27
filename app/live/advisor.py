@@ -247,6 +247,125 @@ def offer_advice(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
     return out
 
 
+DEV_LABEL = {
+    "knight": "Knight",
+    "road_building": "Road Building",
+    "year_of_plenty": "Year of Plenty",
+    "monopoly": "Monopoly",
+}
+
+
+def dev_card_plays(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
+    """What each dev card would do, with the follow-up action spelled out.
+
+    colonist hides the composition of our own hand behind a placeholder enum,
+    so when we only know the count we evaluate every card type and mark them
+    conditional rather than pretending to know what we hold.
+    """
+    mine = eng.my_dev_cards()
+    if not mine["count"]:
+        return []
+    certain = bool(mine["known"]) and not mine["hidden"]
+
+    out: list[dict[str, Any]] = []
+    for kind in ("knight", "road_building", "year_of_plenty", "monopoly"):
+        have = mine["known"].get(kind, 0)
+        if certain and not have:
+            continue
+        probe = cfg.model_copy(deep=True)
+        probe.me.dev_cards = probe.me.dev_cards.model_copy(update={kind: max(1, have)})
+        probe.me.dev_card_played_this_turn = False
+        probe.me.dev_card_bought_this_turn = False
+        move = next(
+            (m for m in solver.solve(probe) if m.steps[0].type == f"play_{kind}"), None
+        )
+        if not move:
+            continue
+        out.append(
+            {
+                "card": kind,
+                "label": DEV_LABEL[kind],
+                "held": have if certain else None,
+                "certain": certain,
+                "score": round(move.score, 1),
+                "action": move.location_hint,
+                "why": move.reasoning,
+                "steps": [s.model_dump() for s in move.steps],
+            }
+        )
+    out.sort(key=lambda d: -d["score"])
+    if mine["bought_this_turn"]:
+        for d in out:
+            d["blocked"] = "bought this turn — cannot play until next turn"
+    return out
+
+
+def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[dict[str, Any]]:
+    """Concrete offers to make: who to ask, what to give, and why they'd agree.
+
+    Partner choice uses their production (who actually makes the resource) and
+    their hand size, and skips whoever is closest to winning.
+    """
+    ctx = solver.build_ctx(cfg)
+    hand = cfg.me.hand
+    players = {p["color"]: p for p in eng.player_summary() if not p["is_me"]}
+    production = eng.production_table()
+    leader_vp = max(ctx.opp_vp.values(), default=0)
+
+    # what we're short of, for the most valuable build we can nearly afford
+    targets: list[tuple[int, str, dict[str, int]]] = []
+    for name in ("city", "settlement", "dev", "road"):
+        need = {r: n - hand.get(r, 0) for r, n in COSTS[name].items() if hand.get(r, 0) < n}
+        if need:
+            targets.append((sum(need.values()), name, need))
+    targets.sort()
+
+    spare = sorted(
+        (r for r in RESOURCES if hand.get(r, 0) > 0),
+        key=lambda r: -(ctx.my_pips.get(r, 0.0) + hand.get(r, 0)),
+    )
+    out: list[dict[str, Any]] = []
+    for missing, build, need in targets:
+        if missing > 2:
+            continue
+        for res, count in need.items():
+            # who produces this, holds cards, and isn't running away with it
+            candidates = []
+            for color, p in players.items():
+                if ctx.opp_vp.get(color, 0) >= max(7, leader_vp):
+                    continue
+                pips = sum(
+                    amt for num, r in production.get(color, {}).items()
+                    for rname, amt in r.items() if rname == res
+                )
+                if p["cards"] > 0:
+                    candidates.append((pips, p["cards"], color))
+            candidates.sort(reverse=True)
+            if not candidates:
+                continue
+            pips, cards, color = candidates[0]
+            give = next((r for r in spare if r != res), None)
+            if not give:
+                continue
+            out.append(
+                {
+                    "to": color,
+                    "give": {give: max(1, count)},
+                    "get": {res: count},
+                    "for": build,
+                    "text": (
+                        f"Ask {color} for {count} {res} — offer {give}. "
+                        f"It completes your {build}"
+                        + (f"; they produce {pips} of it and hold {cards} cards." if pips
+                           else f"; they hold {cards} cards.")
+                    ),
+                }
+            )
+            if len(out) >= limit:
+                return out
+    return out
+
+
 def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
     """Completed trades and offers, newest last."""
     kinds = ("trade_player", "trade_bank", "trade_offered")
@@ -322,6 +441,9 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
     return {
         "discard": discard_advice(eng, cfg),
         "robber": robber_options(eng, cfg),
+        "dev_plays": dev_card_plays(eng, cfg),
+        "proposals": trade_proposals(eng, cfg),
+        "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),
         "phase": cfg.phase,

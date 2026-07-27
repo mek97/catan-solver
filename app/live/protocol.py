@@ -42,6 +42,17 @@ def map_color(color_id: Any) -> Optional[str]:
     return PALETTE[(color_id - 1) % len(PALETTE)]
 
 BUILDING = {1: "settlement", 2: "city"}
+# Development cards. colonist substitutes 10 for any card it is hiding from
+# us (opponents' hands and the bank), so 10 deliberately has no mapping —
+# an unmapped value means "held, but we don't get to know what it is".
+DEV_CARD = {
+    0: "knight",
+    1: "victory_point",
+    2: "road_building",
+    3: "year_of_plenty",
+    4: "monopoly",
+}
+DEV_HIDDEN = 10
 PIECE = {0: "road", 2: "settlement", 3: "city", 5: "robber"}
 
 # portEdgeStates .type: 1 is the generic 3:1 (four of them on a standard board);
