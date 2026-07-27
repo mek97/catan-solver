@@ -86,7 +86,7 @@ class BoardConfig(BaseModel):
     bank: Optional[dict[Resource, int]] = None  # cards left in the bank
     phase: Literal["setup1", "setup2", "main"] = "main"
     turn: Optional[Color] = None
-    pending: Optional[Literal["move_robber"]] = None
+    pending: Optional[Literal["move_robber", "discard"]] = None
 
     @model_validator(mode="after")
     def _check(self) -> "BoardConfig":

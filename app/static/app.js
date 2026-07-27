@@ -337,6 +337,11 @@ function categorise(rec) {
   for (const t of rec.trades || []) {
     if (t.type === "want") out.offer.push({ score: 0, text: t.text, why: null });
   }
+  // an over-limit hand is a risk, not an obligation: spending it down is a
+  // bank action, so it belongs with the bank trades rather than in alerts
+  if (rec.discard && !rec.discard.required) {
+    out.bank.push({ score: 0.5, text: rec.discard.text, why: null });
+  }
 
   for (const k of Object.keys(out)) {
     out[k].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -370,7 +375,7 @@ function renderUrgent(rec) {
     d.querySelector(".atext").textContent = text;
     box.appendChild(d);
   };
-  if (rec?.discard) add("must discard", rec.discard.text);
+  if (rec?.discard?.required) add("must discard now", rec.discard.text);
   if (rec?.pending === "move_robber") {
     const best = rec.robber?.[0];
     add("move the robber", best ? best.text : "choose a hex");

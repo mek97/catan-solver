@@ -413,10 +413,17 @@ def discard_advice(eng: GameEngine, cfg: BoardConfig) -> Optional[dict[str, Any]
         if take > 0:
             drop[r] += take
             left -= take
+    required = cfg.pending == "discard"
+    listed = ", ".join(f"{n} {r}" for r, n in drop.items())
     return {
+        "required": required,
         "must_discard": to_drop,
         "drop": dict(drop),
-        "text": f"Discard {to_drop}: " + ", ".join(f"{n} {r}" for r, n in drop.items()),
+        "text": (
+            f"Discard {to_drop}: {listed}"
+            if required
+            else f"Holding {total} cards — a 7 would cost you {to_drop}: {listed}"
+        ),
     }
 
 

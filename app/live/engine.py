@@ -398,11 +398,15 @@ class GameEngine:
 
         ports = self.ports()
         # only advise on the robber when it is actually ours to move
-        pending = (
-            "move_robber"
-            if (self.action_state() == P.ACTION_MOVE_ROBBER and self.is_my_turn())
-            else None
-        )
+        # A discard is only *required* while colonist is in the discard phase,
+        # which it enters for everyone over the limit when a 7 is rolled --
+        # note this is not gated on whose turn it is.
+        action = self.action_state()
+        pending = None
+        if action == P.ACTION_DISCARD:
+            pending = "discard"
+        elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
+            pending = "move_robber"
 
         return BoardConfig(
             hexes=hexes,

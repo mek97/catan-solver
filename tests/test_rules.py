@@ -162,3 +162,23 @@ def test_overlapping_a_strong_number_costs_more_than_a_weak_one():
     assert solver.PIPS[cfg.hexes[strong].number] > solver.PIPS[cfg.hexes[weak].number]
     # the penalty is pip-weighted, so it must scale with the shared number
     assert solver.PIPS[8] * 0.35 > solver.PIPS[12] * 0.35
+
+
+def test_discard_is_only_required_during_the_discard_phase():
+    """Over seven cards is a risk; the obligation only exists when a 7 lands."""
+    from app.live.advisor import discard_advice
+
+    cfg = cfg_from_fixture()
+    cfg.phase = "main"
+    cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 5, "wheat": 1, "ore": 0}  # 10 cards
+
+    at_risk = discard_advice(None, cfg)
+    assert at_risk and at_risk["required"] is False
+    assert at_risk["must_discard"] == 5 and "would cost you" in at_risk["text"]
+
+    cfg.pending = "discard"
+    now = discard_advice(None, cfg)
+    assert now["required"] is True and now["text"].startswith("Discard 5")
+
+    cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 3, "wheat": 0, "ore": 0}  # 7 cards
+    assert discard_advice(None, cfg) is None, "seven cards is safe"
