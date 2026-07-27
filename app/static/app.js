@@ -6,7 +6,8 @@ const COLORS = ["red", "blue", "orange", "green"];
 const PIP_DOTS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 const RES_ABBR = { wood: "🌲", brick: "🧱", sheep: "🐑", wheat: "🌾", ore: "⛰" };
 
-const state = { geometry: null, config: null, rec: null, myColor: null, on: true, timer: null };
+const state = { geometry: null, config: null, rec: null, myColor: null,
+                heroMove: null, on: true, timer: null };
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, attrs = {}) => {
@@ -159,7 +160,7 @@ function renderBoard() {
   }
 
   svg.append(sand, tiles, ports, pieces, hints);
-  drawHint(state.rec?.moves?.[0]);
+  drawHint(state.heroMove);
 }
 
 /* Action-typed hints: each step of the recommended move is drawn as a ghost of
@@ -311,6 +312,9 @@ function categorise(rec) {
     else if (goal === "move_robber") out.robber.push(item);
     // end_turn stays uncategorised -- "do nothing" is not an action
   }
+  for (const b of rec.bank_options || []) {
+    out.bank.push({ score: b.score, text: b.text, why: b.why });
+  }
   for (const d of rec.dev_plays || []) {
     out.dev.push({
       score: d.score, text: `${d.label}: ${d.action}`, why: d.why,
@@ -388,27 +392,52 @@ function renderUrgent(rec) {
   }
 }
 
+/* The best action is the best across *every* category, not just the solver's
+   move list. Dev-card plays, robber placements and trade proposals are scored
+   elsewhere, so ranking only rec.moves could show "end your turn" while a
+   29-point knight sat one row below. */
+function bestOverall(groups) {
+  let best = null;
+  for (const cat of CATS) {
+    for (const item of groups[cat.key] || []) {
+      if (!best || (item.score ?? 0) > (best.item.score ?? 0)) best = { cat, item };
+    }
+  }
+  return best;
+}
+
 function renderPrimary(rec, groups) {
   const box = $("#primary");
-  const top = rec?.moves?.[0];
-  if (!top) {
-    box.innerHTML = `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
+  const best = bestOverall(groups);
+  const pass = rec?.moves?.find((m) => m.steps[0].type === "end_turn");
+
+  if (!best) {
+    box.innerHTML = pass
+      ? `<div class="hero" style="--cat:var(--dim)">
+           <div class="hero-top"><span class="hero-cat">pass</span></div>
+           <div class="hero-act">end your turn</div>
+           <div class="hero-why">Nothing available — bank your cards.</div>
+         </div>`
+      : `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
+    state.heroMove = null;
     return;
   }
-  const cat =
-    CATS.find((c) => (groups[c.key] || []).some((i) => i.move === top)) ||
-    { name: "Pass", color: "var(--dim)" };
+
+  const { cat, item } = best;
+  const label = rec?.my_turn ? cat.name : `next turn — ${cat.name}`;
   box.innerHTML = `
     <div class="hero" style="--cat:${cat.color}">
       <div class="hero-top">
-        <span class="hero-cat">${rec.my_turn ? cat.name : "next turn — " + cat.name}</span>
-        <span class="hero-score">${top.score.toFixed(1)}</span>
+        <span class="hero-cat">${label}</span>
+        ${item.tag ? `<span class="opt-tag tag-${item.tag}">${item.tag}</span>` : ""}
+        <span class="hero-score">${(item.score ?? 0).toFixed(1)}</span>
       </div>
       <div class="hero-act"></div>
-      <div class="hero-why"></div>
+      ${item.why ? '<div class="hero-why"></div>' : ""}
     </div>`;
-  box.querySelector(".hero-act").textContent = top.location_hint;
-  box.querySelector(".hero-why").textContent = top.reasoning;
+  box.querySelector(".hero-act").textContent = item.text;
+  if (item.why) box.querySelector(".hero-why").textContent = item.why;
+  state.heroMove = item.move || null;
 }
 
 const openCats = new Set(["incoming"]);
@@ -445,7 +474,7 @@ function renderActions(rec, groups) {
       if (it.why) row.querySelector(".opt-w").textContent = it.why;
       if (it.move) {
         row.addEventListener("mouseenter", () => drawHint(it.move));
-        row.addEventListener("mouseleave", () => drawHint(rec?.moves?.[0]));
+        row.addEventListener("mouseleave", () => drawHint(state.heroMove));
       }
       body.appendChild(row);
     });
@@ -534,6 +563,7 @@ function renderPanel(rec) {
   const groups = categorise(rec);
   renderPrimary(rec, groups);
   renderActions(rec, groups);
+  drawHint(state.heroMove);
   renderIntel(rec);
 }
 

@@ -372,6 +372,52 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
     return out[:limit]
 
 
+def bank_options(eng: GameEngine, cfg: BoardConfig, limit: int = 4) -> list[dict[str, Any]]:
+    """Every bank/port trade you can actually make right now, ranked.
+
+    The solver only emits bank trades as part of a combo that completes a
+    build, so a trade that merely improves your hand never surfaced -- the
+    category read "nothing available" while you were sitting on four sheep.
+    This lists what the rates and the bank's stock genuinely allow.
+    """
+    ctx = solver.build_ctx(cfg)
+    hand = cfg.me.hand
+    stock = cfg.bank or {}
+    before = _best_score(cfg, dict(hand))
+    out: list[dict[str, Any]] = []
+
+    for give in RESOURCES:
+        rate = ctx.rates.get(give, rules.BANK_RATE)
+        if hand.get(give, 0) < rate:
+            continue
+        for get in RESOURCES:
+            if get == give or stock.get(get, rules.BANK_PER_RESOURCE) < 1:
+                continue
+            after = _hand_after(cfg, Counter({give: rate}), Counter({get: 1}))
+            if after is None:
+                continue
+            gain = _best_score(cfg, after) - before
+            # even a trade that builds nothing this turn is worth something if
+            # it converts a surplus into what we never produce
+            scarcity = 1.0 / max(1.0, ctx.my_pips.get(get, 0.0) + 1)
+            out.append(
+                {
+                    "give": {give: rate},
+                    "get": {get: 1},
+                    "rate": rate,
+                    "score": round(gain + scarcity, 1),
+                    "text": f"trade {rate} {give} for 1 {get}"
+                    + (f" ({rate}:1)" if rate != rules.BANK_RATE else ""),
+                    "why": (
+                        f"unlocks a better move this turn (+{gain:.1f})" if gain > 0.1
+                        else f"you produce little {get}; {give} refills"
+                    ),
+                }
+            )
+    out.sort(key=lambda o: -o["score"])
+    return out[:limit]
+
+
 def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
     """Completed trades and offers, newest last."""
     kinds = ("trade_player", "trade_bank", "trade_offered")
@@ -466,6 +512,7 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "discard": discard_advice(eng, cfg),
         "robber": robber_options(eng, cfg),
         "dev_plays": dev_card_plays(eng, cfg),
+        "bank_options": bank_options(eng, cfg),
         "proposals": trade_proposals(eng, cfg),
         "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),

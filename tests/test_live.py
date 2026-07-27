@@ -356,3 +356,32 @@ def test_export_reports_a_game_it_cannot_derive():
 
     engine = replay_frames([])
     assert not engine.state
+
+
+def test_bank_lists_every_trade_the_rates_allow():
+    """Bank showed 'nothing available' while sitting on four sheep, because the
+    solver only emits bank trades inside a build combo."""
+    from app.live.advisor import bank_options
+
+    eng = replay()
+    cfg = eng.board_config()
+    cfg.me.hand = {"wood": 0, "brick": 0, "sheep": 4, "wheat": 0, "ore": 0}
+    opts = bank_options(eng, cfg)
+    assert opts, "four sheep at 4:1 is a legal trade and must be offered"
+    assert all(list(o["give"])[0] == "sheep" for o in opts)
+    assert all(list(o["get"])[0] != "sheep" for o in opts)
+    assert opts == sorted(opts, key=lambda o: -o["score"])
+
+    cfg.me.hand = {"wood": 0, "brick": 0, "sheep": 3, "wheat": 0, "ore": 0}
+    assert bank_options(eng, cfg) == [], "three sheep cannot pay a 4:1"
+
+
+def test_bank_options_respect_an_empty_bank():
+    from app.live.advisor import bank_options
+
+    eng = replay()
+    cfg = eng.board_config()
+    cfg.me.hand = {"wood": 0, "brick": 0, "sheep": 8, "wheat": 0, "ore": 0}
+    cfg.bank = {"wood": 0, "brick": 0, "sheep": 19, "wheat": 0, "ore": 5}
+    gets = {list(o["get"])[0] for o in bank_options(eng, cfg)}
+    assert gets == {"ore"}, "only the pile with stock can be traded for"
