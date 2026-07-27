@@ -277,164 +277,184 @@ function drawHint(move) {
 
 /* ---------------- panel ---------------- */
 
-function renderPanel(rec, status) {
-  const mine = rec?.my_turn;
-  const lbl = $("#turn-label");
-  lbl.textContent = rec ? (mine ? "YOUR TURN" : `${rec.turn ?? "…"}'s turn`) : "waiting for a game";
-  lbl.className = mine ? "mine" : "";
-  const hand = rec ? Object.entries(rec.hand).filter(([, n]) => n).map(([r, n]) => `${n} ${r}`).join(" · ") : "";
-  $("#turn-sub").textContent = rec
-    ? `${rec.phase}${hand ? " · " + hand : " · no cards"}`
-    : "start a game in the CDP browser";
+/* Every recommendation is filed into one of the actions you can actually take
+   at the table, so the panel answers "what can I do right now" rather than
+   making you scan eleven stacked lists. Categories keep a fixed order and a
+   fixed colour, so position alone tells you what you're looking at. */
 
-  const best = $("#best");
-  const top = rec?.moves?.[0];
-  if (top && mine) {
-    best.innerHTML = `<div class="best-card">
-      <div class="best-tag">do this</div>
-      <div class="best-hint"></div>
-      <div class="best-why"></div></div>`;
-    best.querySelector(".best-hint").textContent = top.location_hint;
-    best.querySelector(".best-why").textContent = top.reasoning;
-  } else if (top) {
-    best.innerHTML = `<div class="best-card" style="border-color:var(--line)">
-      <div class="best-tag" style="color:var(--dim)">when your turn comes</div>
-      <div class="best-hint"></div></div>`;
-    best.querySelector(".best-hint").textContent = top.location_hint;
-  } else {
-    best.innerHTML = `<div class="best-empty">No recommendation yet.</div>`;
+const CATS = [
+  { key: "incoming", name: "Respond",  color: "var(--deal)"  },
+  { key: "place",    name: "Place",    color: "var(--place)" },
+  { key: "dev",      name: "Dev card", color: "var(--dev)"   },
+  { key: "bank",     name: "Bank",     color: "var(--bank)"  },
+  { key: "offer",    name: "Offer",    color: "var(--deal)"  },
+  { key: "robber",   name: "Robber",   color: "var(--rob)"   },
+];
+
+const PLACE_STEPS = new Set([
+  "build_settlement", "setup_settlement", "build_city", "build_road", "setup_road",
+]);
+
+function categorise(rec) {
+  const out = Object.fromEntries(CATS.map((c) => [c.key, []]));
+  if (!rec) return out;
+
+  // Classify by the *goal* -- the last step. A combo like "bank 4 brick for a
+  // sheep, then buy a dev card" is a dev-card action funded by a bank trade,
+  // not a bank trade; filing by the first step mislabels every combo.
+  for (const m of rec.moves || []) {
+    const goal = m.steps[m.steps.length - 1].type;
+    const item = { score: m.score, text: m.location_hint, why: m.reasoning, move: m };
+    if (PLACE_STEPS.has(goal)) out.place.push(item);
+    else if (goal === "buy_dev" || goal.startsWith("play_")) out.dev.push(item);
+    else if (goal === "trade_bank") out.bank.push(item);
+    else if (goal === "move_robber") out.robber.push(item);
+    // end_turn stays uncategorised -- "do nothing" is not an action
+  }
+  for (const d of rec.dev_plays || []) {
+    out.dev.push({
+      score: d.score, text: `${d.label}: ${d.action}`, why: d.why,
+      tag: d.certain ? null : "if", move: { steps: d.steps },
+    });
+  }
+  for (const r of rec.robber || []) {
+    out.robber.push({
+      score: r.score, text: r.text, why: r.why,
+      move: { steps: [{ type: "move_robber", robber_hex: r.hex, steal_from: r.steal_from }] },
+    });
+  }
+  for (const a of rec.offer_advice || []) {
+    const o = a.offer || {};
+    out.incoming.push({
+      score: a.score ?? 0, tag: a.verdict,
+      text: `${o.from ?? "?"}: give ${(o.wants || []).join(", ") || "?"} → get ${(o.offers || []).join(", ") || "?"}`,
+      why: a.text,
+    });
+  }
+  for (const p of rec.proposals || []) {
+    out.offer.push({ score: 0, text: p.text, why: null });
+  }
+  for (const t of rec.trades || []) {
+    if (t.type === "want") out.offer.push({ score: 0, text: t.text, why: null });
   }
 
-  // discard (7 rolled and you're over the limit)
-  const dis = $("#discard");
-  if (rec?.discard) {
-    dis.innerHTML = `<div class="urgent-text"></div>`;
-    dis.querySelector(".urgent-text").textContent = rec.discard.text;
-    $("#discard-block").classList.remove("hidden");
-  } else $("#discard-block").classList.add("hidden");
+  for (const k of Object.keys(out)) {
+    out[k].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const seen = new Set();
+    out[k] = out[k].filter((x) => !seen.has(x.text) && seen.add(x.text));
+  }
+  return out;
+}
 
-  // dev cards: what each would do, with the follow-up action
-  const dev = $("#devplays");
-  dev.replaceChildren();
-  (rec?.dev_plays || []).forEach((d) => {
-    const row = document.createElement("div");
-    row.className = `dev${d.certain ? "" : " maybe"}`;
-    row.innerHTML = `
-      <div class="dhead">
-        <span class="score">${d.score.toFixed(1)}</span>
-        <span class="dname">${d.label}${d.held ? ` ×${d.held}` : ""}</span>
-        ${d.certain ? "" : '<span class="tagq">if held</span>'}
-        ${d.blocked ? '<span class="tagq blk">bought this turn</span>' : ""}
+function renderHand(rec) {
+  const strip = $("#hand-strip");
+  strip.replaceChildren();
+  const hand = rec?.hand || {};
+  const held = Object.entries(hand).filter(([, n]) => n > 0);
+  if (!held.length) {
+    strip.innerHTML = '<span class="hcard empty">no cards</span>';
+    return;
+  }
+  strip.innerHTML = held
+    .map(([r, n]) => `<span class="hcard ${r}">${n} ${RES_ABBR[r] || r}</span>`)
+    .join("");
+}
+
+function renderUrgent(rec) {
+  const box = $("#urgent");
+  box.replaceChildren();
+  const add = (tag, text) => {
+    const d = document.createElement("div");
+    d.className = "alert";
+    d.innerHTML = `<div class="atag">${tag}</div><div class="atext"></div>`;
+    d.querySelector(".atext").textContent = text;
+    box.appendChild(d);
+  };
+  if (rec?.discard) add("must discard", rec.discard.text);
+  if (rec?.pending === "move_robber") {
+    const best = rec.robber?.[0];
+    add("move the robber", best ? best.text : "choose a hex");
+  }
+  const waiting = (rec?.offer_advice || []).filter((a) => a.verdict !== "cannot");
+  if (waiting.length && !rec?.my_turn) {
+    add(`${waiting.length} offer${waiting.length > 1 ? "s" : ""} on the table`,
+        waiting[0].text);
+  }
+}
+
+function renderPrimary(rec, groups) {
+  const box = $("#primary");
+  const top = rec?.moves?.[0];
+  if (!top) {
+    box.innerHTML = `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
+    return;
+  }
+  const cat =
+    CATS.find((c) => (groups[c.key] || []).some((i) => i.move === top)) ||
+    { name: "Pass", color: "var(--dim)" };
+  box.innerHTML = `
+    <div class="hero" style="--cat:${cat.color}">
+      <div class="hero-top">
+        <span class="hero-cat">${rec.my_turn ? cat.name : "next turn — " + cat.name}</span>
+        <span class="hero-score">${top.score.toFixed(1)}</span>
       </div>
-      <div class="daction"></div>`;
-    row.querySelector(".daction").textContent = d.action;
-    const fake = { steps: d.steps };
-    row.addEventListener("mouseenter", () => drawHint(fake));
-    row.addEventListener("mouseleave", () => drawHint(rec.moves?.[0]));
-    dev.appendChild(row);
-  });
-  const md = rec?.my_dev;
-  $("#dev-sub").textContent = md?.count
-    ? `${md.count} held${md.hidden ? " (hidden)" : ""}${md.used ? ` · ${md.used} played` : ""}`
-    : "";
-  $("#dev-block").classList.toggle("hidden", !(rec?.dev_plays?.length));
+      <div class="hero-act"></div>
+      <div class="hero-why"></div>
+    </div>`;
+  box.querySelector(".hero-act").textContent = top.location_hint;
+  box.querySelector(".hero-why").textContent = top.reasoning;
+}
 
-  // trades to propose
-  const props = $("#proposals");
-  props.replaceChildren();
-  (rec?.proposals || []).forEach((p) => {
-    const d = document.createElement("div");
-    d.className = "tip want";
-    d.textContent = p.text;
-    props.appendChild(d);
-  });
-  $("#propose-block").classList.toggle("hidden", !(rec?.proposals?.length));
+const openCats = new Set(["incoming"]);
 
-  // robber placements — always ranked, highlighted on hover
-  const rob = $("#robber");
-  rob.replaceChildren();
-  (rec?.robber || []).forEach((r, i) => {
-    const d = document.createElement("div");
-    d.className = `rob${i === 0 ? " top" : ""}`;
-    d.innerHTML = `<span class="score">${r.score.toFixed(1)}</span><span class="txt"></span>`;
-    d.querySelector(".txt").textContent = r.text;
-    const fake = { steps: [{ type: "move_robber", robber_hex: r.hex, steal_from: r.steal_from }] };
-    d.addEventListener("mouseenter", () => drawHint(fake));
-    d.addEventListener("mouseleave", () => drawHint(rec.moves?.[0]));
-    rob.appendChild(d);
-  });
-  $("#robber-sub").textContent = rec?.pending === "move_robber" ? "— move it now" : "if you play a knight";
-  $("#robber-block").classList.toggle("hidden", !(rec?.robber?.length));
-
-  const alts = $("#alts");
-  alts.replaceChildren();
-  (rec?.moves || []).slice(1, 6).forEach((m) => {
-    const d = document.createElement("div");
-    d.className = "alt";
-    d.innerHTML = `<span class="score">${m.score.toFixed(1)}</span><span class="txt"></span>`;
-    d.querySelector(".txt").textContent = m.location_hint;
-    d.addEventListener("mouseenter", () => drawHint(m));
-    d.addEventListener("mouseleave", () => drawHint(rec.moves[0]));
-    alts.appendChild(d);
-  });
-  $("#alts-block").classList.toggle("hidden", !(rec?.moves?.length > 1));
-
-  const trades = $("#trades");
-  trades.replaceChildren();
-  (rec?.trades || []).forEach((t) => {
-    const d = document.createElement("div");
-    d.className = `tip ${t.type}`;
-    d.textContent = t.text;
-    trades.appendChild(d);
-  });
-  $("#trades-block").classList.toggle("hidden", !(rec?.trades?.length));
-
-  // open offers, each with an accept / reject / counter verdict
-  const offers = $("#offers");
-  offers.replaceChildren();
-  const advice = rec?.offer_advice || [];
-  const myOffers = (rec?.offers || []).filter((o) => o.from_me);
-  const doneTrades = (rec?.trade_log || []).slice().reverse();
-
-  advice.forEach((a) => {
-    const o = a.offer || {};
-    const d = document.createElement("div");
-    d.className = `offer-card ${a.verdict}`;
-    d.innerHTML = `
-      <div class="ohead">
-        <span class="dot" style="background:var(--${o.from || "line"})"></span>
-        <span class="owho">${o.from ?? "?"} wants <b>${(o.wants || []).join(", ") || "?"}</b>
-          for <b>${(o.offers || []).join(", ") || "?"}</b></span>
-        <span class="verdict ${a.verdict}">${a.verdict}</span>
+function renderActions(rec, groups) {
+  const box = $("#actions");
+  box.replaceChildren();
+  for (const cat of CATS) {
+    const items = groups[cat.key] || [];
+    const wrap = document.createElement("section");
+    wrap.className = `cat${items.length ? "" : " empty"}${openCats.has(cat.key) && items.length ? " open" : ""}`;
+    wrap.style.setProperty("--cat", cat.color);
+    const best = items[0];
+    wrap.innerHTML = `
+      <div class="cat-head">
+        <i class="cat-key"></i>
+        <span class="cat-name">${cat.name}</span>
+        <span class="cat-best"></span>
+        <span class="cat-n">${items.length || ""}</span>
+        <span class="cat-chev">${items.length ? "▶" : ""}</span>
       </div>
-      <div class="owhy"></div>`;
-    d.querySelector(".owhy").textContent = a.text;
-    offers.appendChild(d);
-  });
+      <div class="cat-body"></div>`;
+    wrap.querySelector(".cat-best").textContent = best ? best.text : "nothing available";
 
-  myOffers.forEach((o) => {
-    const d = document.createElement("div");
-    d.className = "offer live";
-    d.innerHTML = `<span class="dot" style="background:var(--${o.from || "line"})"></span>
-      <span>your offer: <b>${(o.offers || []).join(", ") || "?"}</b>
-      for <b>${(o.wants || []).join(", ") || "?"}</b> — awaiting replies</span>`;
-    offers.appendChild(d);
-  });
-  doneTrades.forEach((t) => {
-    const d = document.createElement("div");
-    d.className = "offer";
-    const j = (a) => (a || []).join(", ");
-    let txt;
-    if (t.kind === "trade_player") txt = `${t.color} → ${t.with}: gave ${j(t.gave)}, got ${j(t.got)}`;
-    else if (t.kind === "trade_bank") txt = `${t.color} banked ${j(t.gave)} → ${j(t.got)}`;
-    else txt = `${t.color} offered ${j(t.offers)} for ${j(t.wants)}`;
-    d.innerHTML = `<span class="dot" style="background:var(--${t.color || "line"})"></span><span>${txt}</span>`;
-    offers.appendChild(d);
-  });
-  $("#offers-block").classList.toggle(
-    "hidden", !(advice.length || myOffers.length || doneTrades.length));
+    const body = wrap.querySelector(".cat-body");
+    items.forEach((it) => {
+      const row = document.createElement("div");
+      row.className = "opt";
+      row.innerHTML = `<span class="opt-s">${it.score ? it.score.toFixed(1) : "—"}</span>
+        <span><span class="opt-t"></span>${
+          it.tag ? `<span class="opt-tag tag-${it.tag}">${it.tag}</span>` : ""
+        }${it.why ? '<div class="opt-w"></div>' : ""}</span>`;
+      row.querySelector(".opt-t").textContent = it.text;
+      if (it.why) row.querySelector(".opt-w").textContent = it.why;
+      if (it.move) {
+        row.addEventListener("mouseenter", () => drawHint(it.move));
+        row.addEventListener("mouseleave", () => drawHint(rec?.moves?.[0]));
+      }
+      body.appendChild(row);
+    });
 
-  // players: hand intel + production-by-roll
+    if (items.length) {
+      wrap.querySelector(".cat-head").addEventListener("click", () => {
+        wrap.classList.toggle("open");
+        openCats.has(cat.key) ? openCats.delete(cat.key) : openCats.add(cat.key);
+      });
+    }
+    box.appendChild(wrap);
+  }
+}
+
+function renderIntel(rec) {
   const players = $("#players");
   players.replaceChildren();
   (rec?.players || []).forEach((p) => {
@@ -442,78 +462,82 @@ function renderPanel(rec, status) {
     card.className = `pcard${p.is_me ? " me" : ""}`;
     const known = Object.entries(p.hand?.known || {}).filter(([, n]) => n > 0);
     const chips = known.map(([r, n]) => `<span class="chip ${r}">${n}${RES_ABBR[r]}</span>`).join("");
-    const unknown = p.hand?.unknown
-      ? `<span class="chip unk">${p.hand.unknown}?</span>` : "";
+    const unk = p.hand?.unknown ? `<span class="chip unk">${p.hand.unknown}?</span>` : "";
     const prod = Object.entries(p.production || {})
       .sort((a, b) => Number(a[0]) - Number(b[0]))
       .map(([num, res]) => {
         const txt = Object.entries(res).map(([r, n]) => `${n > 1 ? n : ""}${RES_ABBR[r]}`).join("");
-        return `<span class="pnum${num === "6" || num === "8" ? " hot" : ""}">
-                  <b>${num}</b>${txt}</span>`;
+        return `<span class="pnum${num === "6" || num === "8" ? " hot" : ""}"><b>${num}</b>${txt}</span>`;
       }).join("");
     card.innerHTML = `
-      <div class="phead">
-        <span class="dot" style="background:var(--${p.color})"></span>
+      <div class="phead"><span class="dot" style="background:var(--${p.color})"></span>
         <span class="nm">${p.color}${p.is_me ? " (you)" : ""}</span>
-        <span class="vp">${p.vp_visible} vp</span>
-      </div>
-      <div class="pstats">${p.settlements}🏠 ${p.cities}🏛 ${p.roads}🛣
-        · ${p.cards} cards · ${p.dev_cards} dev${p.dev_used ? ` (${p.dev_used} played)` : ""}</div>
-      <div class="chips">${chips}${unknown || (known.length ? "" : '<span class="chip unk">—</span>')}</div>
+        <span class="vp">${p.vp_visible} VP</span></div>
+      <div class="pstats">${p.settlements}s ${p.cities}c ${p.roads}r · ${p.cards} cards · ${p.dev_cards} dev${
+        p.dev_used ? ` (${p.dev_used} played)` : ""}</div>
+      <div class="chips">${chips}${unk || (known.length ? "" : '<span class="chip unk">—</span>')}</div>
       ${prod ? `<div class="prod">${prod}</div>` : ""}`;
     players.appendChild(card);
   });
-  $("#players-block").classList.toggle("hidden", !(rec?.players?.length));
 
-  // dice: recent rolls + distribution vs expected
   const rollsEl = $("#rolls");
   rollsEl.replaceChildren();
-  (rec?.rolls || []).slice(-18).forEach((n) => {
+  (rec?.rolls || []).slice(-20).forEach((n) => {
     const s = document.createElement("span");
     s.className = `roll-chip${n === 7 ? " seven" : ""}`;
     s.textContent = n;
     rollsEl.appendChild(s);
   });
-
   const dice = $("#dice");
   dice.replaceChildren();
   if (rec?.dice?.rolls) {
     const { counts, expected } = rec.dice;
     const max = Math.max(1, ...Object.values(counts), ...Object.values(expected || {}));
     for (let n = 2; n <= 12; n++) {
-      const c = counts[String(n)] || 0;
-      const e = (expected || {})[String(n)] || 0;
+      const c = counts[String(n)] || 0, e = (expected || {})[String(n)] || 0;
       const b = document.createElement("div");
       b.className = "dbar";
       b.title = `${n}: rolled ${c}× (expected ${e})`;
-      b.innerHTML = `
-        <div class="stack">
-          <div class="exp" style="height:${Math.round((e / max) * 34)}px"></div>
+      b.innerHTML = `<div class="stack">
+          <div class="exp" style="height:${Math.round((e / max) * 32)}px"></div>
           <div class="bar${n === 7 ? " seven" : n === 6 || n === 8 ? " hot" : ""}"
-               style="height:${Math.round((c / max) * 34) + 2}px"></div>
+               style="height:${Math.round((c / max) * 32) + 2}px"></div>
         </div><div class="lbl">${n}</div>`;
       dice.appendChild(b);
     }
     $("#dice-sub").textContent = `${rec.dice.rolls} rolls · cold ${rec.dice.coldest.join(",")}`;
   }
-  $("#dice-block").classList.toggle("hidden", !rec?.dice?.rolls);
+}
 
-  // turn timer
+function renderPanel(rec) {
+  const mineTurn = rec?.my_turn;
+  const lbl = $("#turn-label");
+  lbl.textContent = rec ? (mineTurn ? "your turn" : `${rec.turn ?? "…"}'s turn`) : "waiting for a game";
+  lbl.className = mineTurn ? "mine" : "";
+  $("#turn-sub").textContent = rec ? rec.phase : "start a game in the attached browser";
+
   const t = $("#timer");
   if (rec?.timer) {
     const left = Math.max(0, rec.timer.remaining);
     t.textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
     t.className = left <= 10 ? "urgent" : "";
   } else t.textContent = "";
+
+  renderHand(rec);
+  renderUrgent(rec);
+  const groups = categorise(rec);
+  renderPrimary(rec, groups);
+  renderActions(rec, groups);
+  renderIntel(rec);
 }
 
 function renderLog(events) {
   const box = $("#log");
+  const j = (a) => (a || []).join(",");
   const fmt = (e) => {
     const w = e.color ? `${e.color} ` : "";
-    const j = (a) => (a || []).join(",");
     switch (e.kind) {
-      case "dice_rolled": return `🎲 ${w}rolled ${e.total}`;
+      case "dice_rolled": return `▸ ${w}rolled ${e.total}`;
       case "piece_placed": return `${w}placed ${e.piece}`;
       case "piece_bought": return `${w}bought ${e.piece}`;
       case "cards_received": return `${w}got ${j(e.cards)}`;
@@ -532,8 +556,8 @@ function renderLog(events) {
     return `<div class="${cls}">${fmt(e)}</div>`;
   }).join("");
   box.scrollTop = box.scrollHeight;
-  $("#log-block").classList.toggle("hidden", !events.length);
 }
+
 
 /* ---------------- polling ---------------- */
 
@@ -549,7 +573,7 @@ async function poll() {
     if (!status.connected) { setLive("err", status.error ? "feed error" : "connecting…"); return; }
     if (!status.has_state) {
       setLive("on", "connected — waiting for a game");
-      renderPanel(null, status);
+      renderPanel(null);
       return;
     }
     const [st, rec, log] = await Promise.all([
@@ -560,7 +584,7 @@ async function poll() {
     state.config = st.config;
     state.rec = rec;
     renderBoard();
-    renderPanel(rec, status);
+    renderPanel(rec);
     renderLog(log.events);
     const gaps = status.gaps?.length ? ` · ⚠ ${status.gaps.length} gap` : "";
     setLive("on", `live · ${status.events} events${gaps}`);

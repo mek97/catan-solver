@@ -4,23 +4,27 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>catan-solver — live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <main>
     <section id="board-wrap">
       <svg id="board" viewBox="-320 -300 640 600" preserveAspectRatio="xMidYMid meet"></svg>
+
       <div id="board-status">
         <span id="live-dot"></span>
         <span id="live-text">connecting…</span>
-        <button id="live-toggle" title="pause / resume polling">⏸</button>
+        <button id="live-toggle" title="pause / resume">⏸</button>
       </div>
 
       <div id="hint-banner" class="hidden"></div>
 
       <form id="open-bar" autocomplete="off">
         <input id="open-url" type="text" spellcheck="false"
-               placeholder="paste a colonist.io game link and press ↵" />
+               placeholder="paste a colonist.io game link" />
         <button type="submit">Open</button>
       </form>
     </section>
@@ -28,64 +32,32 @@
     <aside id="panel">
       <header id="turn-bar">
         <div class="turn-row">
-          <div id="turn-label">waiting for a game</div>
-          <div id="timer"></div>
+          <span id="turn-label">waiting for a game</span>
+          <span id="timer"></span>
         </div>
         <div id="turn-sub"></div>
+        <div id="hand-strip"></div>
       </header>
 
-      <section id="best"></section>
+      <div id="urgent"></div>
+      <div id="primary"></div>
+      <div id="actions"></div>
 
-      <section class="block urgent-block hidden" id="discard-block">
-        <h2>Discard now</h2>
-        <div id="discard"></div>
-      </section>
-
-      <section class="block" id="dev-block">
-        <h2>Dev cards <span id="dev-sub"></span></h2>
-        <div id="devplays"></div>
-      </section>
-
-      <section class="block" id="propose-block">
-        <h2>Trades to propose</h2>
-        <div id="proposals"></div>
-      </section>
-
-      <section class="block" id="robber-block">
-        <h2>Robber <span id="robber-sub"></span></h2>
-        <div id="robber"></div>
-      </section>
-
-      <section class="block" id="alts-block">
-        <h2>Alternatives</h2>
-        <div id="alts"></div>
-      </section>
-
-      <section class="block" id="trades-block">
-        <h2>Trade advice</h2>
-        <div id="trades"></div>
-      </section>
-
-      <section class="block" id="offers-block">
-        <h2>Trades on the table</h2>
-        <div id="offers"></div>
-      </section>
-
-      <section class="block" id="players-block">
-        <h2>Players</h2>
-        <div id="players"></div>
-      </section>
-
-      <section class="block" id="dice-block">
-        <h2>Dice <span id="dice-sub"></span></h2>
-        <div id="rolls"></div>
-        <div id="dice"></div>
-      </section>
-
-      <section class="block" id="log-block">
-        <h2>Game log</h2>
-        <div id="log"></div>
-      </section>
+      <div id="intel">
+        <details id="intel-players" open>
+          <summary>Players</summary>
+          <div id="players"></div>
+        </details>
+        <details id="intel-dice">
+          <summary>Dice <span id="dice-sub"></span></summary>
+          <div id="rolls"></div>
+          <div id="dice"></div>
+        </details>
+        <details id="intel-log">
+          <summary>Game log</summary>
+          <div id="log"></div>
+        </details>
+      </div>
     </aside>
   </main>
 
