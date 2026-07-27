@@ -138,8 +138,11 @@ def build_ctx(cfg: BoardConfig) -> Ctx:
         for port in cfg.ports
         if any(v in ctx.my_buildings for v in port.vertices)
     }
+    authoritative = cfg.me.bank_rates or {}
     for r in RESOURCES:
-        if r in my_ports:
+        if r in authoritative:
+            ctx.rates[r] = authoritative[r]
+        elif r in my_ports:
             ctx.rates[r] = 2
         elif "3:1" in my_ports:
             ctx.rates[r] = 3

@@ -366,6 +366,7 @@ class GameEngine:
             me=MyState(
                 color=self.my_color,  # type: ignore[arg-type]
                 hand=self.my_hand(),
+                bank_rates=self.bank_ratios() or None,
                 dev_cards=DevCards(**{
                     k: v for k, v in self.my_dev_cards()["known"].items()
                     if k in DevCards.model_fields

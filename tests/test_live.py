@@ -232,3 +232,26 @@ def test_our_own_offers_are_not_self_advised():
               "wantedResources": [5], "playerResponses": {}},
     }
     assert offer_advice(eng, cfg) == []
+
+
+def test_authoritative_bank_rates_win_over_geometry():
+    """colonist reports real port ratios; they must beat our derived guess."""
+    from app import solver
+
+    eng = replay()
+    cfg = eng.board_config()
+    assert cfg.me.bank_rates, "live config should carry colonist's ratios"
+    cfg.me.bank_rates = {**cfg.me.bank_rates, "ore": 2}
+    assert solver.build_ctx(cfg).rates["ore"] == 2
+
+
+def test_trade_proposals_are_scored_and_ranked():
+    from app.live.advisor import trade_proposals
+
+    eng = replay()
+    cfg = eng.board_config()
+    props = trade_proposals(eng, cfg)
+    for p in props:
+        assert "score" in p and p["give"] and p["get"]
+        assert set(p["give"]) & set(cfg.me.hand), "must offer something we hold"
+    assert props == sorted(props, key=lambda p: -p["score"])

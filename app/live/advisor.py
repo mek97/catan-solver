@@ -347,12 +347,17 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
             give = next((r for r in spare if r != res), None)
             if not give:
                 continue
+            # score it the same way we score an incoming offer, so proposing a
+            # trade competes with building instead of always sorting last
+            after = _hand_after(cfg, Counter({give: max(1, count)}), Counter({res: count}))
+            gain = (_best_score(cfg, after) - _best_score(cfg, dict(hand))) if after else 0.0
             out.append(
                 {
                     "to": color,
                     "give": {give: max(1, count)},
                     "get": {res: count},
                     "for": build,
+                    "score": round(gain, 1),
                     "text": (
                         f"Ask {color} for {count} {res} — offer {give}. "
                         f"It completes your {build}"
@@ -361,9 +366,10 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
                     ),
                 }
             )
-            if len(out) >= limit:
-                return out
-    return out
+            if len(out) >= limit * 2:
+                break
+    out.sort(key=lambda p: -p["score"])
+    return out[:limit]
 
 
 def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:

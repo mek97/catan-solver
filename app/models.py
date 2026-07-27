@@ -66,6 +66,10 @@ class DevCards(BaseModel):
 class MyState(BaseModel):
     color: Color
     hand: dict[Resource, int] = Field(default_factory=dict)
+    # colonist reports each player's real bank/port ratios; when present these
+    # win over anything we'd derive from port geometry, which can't know about
+    # rule variants and is only as good as our port parsing
+    bank_rates: Optional[dict[Resource, int]] = None
     dev_cards: DevCards = Field(default_factory=DevCards)
     dev_card_bought_this_turn: bool = False
     dev_card_played_this_turn: bool = False

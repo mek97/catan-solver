@@ -332,7 +332,7 @@ function categorise(rec) {
     });
   }
   for (const p of rec.proposals || []) {
-    out.offer.push({ score: 0, text: p.text, why: null });
+    out.offer.push({ score: p.score ?? 0, text: p.text, why: null });
   }
   for (const t of rec.trades || []) {
     if (t.type === "want") out.offer.push({ score: 0, text: t.text, why: null });
