@@ -25,6 +25,11 @@ from .store import Store
 CDP_HTTP = "http://localhost:9222"
 COLONIST_WS = "socket.svr.colonist.io"
 
+# Shortest gap between page reloads when recovering a mid-game attach. Low
+# enough to get back in play quickly, high enough that a reload always has
+# time to finish and deliver its snapshot before we consider another.
+RESYNC_COOLDOWN = 10.0
+
 
 class LiveFeed:
     """Owns the store + engine and keeps them in sync with the live game."""
@@ -41,7 +46,13 @@ class LiveFeed:
         self._stop = threading.Event()
         self._page_session: Optional[str] = None
         self._pending_nav: list[str] = []
+        self._pending_reload = False
         self._cmd_lock = threading.Lock()
+        # diffs arriving with no snapshot to apply them to => we attached
+        # mid-game and need colonist to re-send one
+        self._orphan_diffs = 0
+        self._last_resync = 0.0
+        self.resyncing = False
 
     # --- driving the attached browser ---------------------------------------
 
@@ -80,7 +91,10 @@ class LiveFeed:
             else None,
             "gaps": self.store.gaps(self.game_id) if self.game_id else [],
             "error": self.error,
-            **self.store.stats(),
+            "resyncing": self.resyncing,
+            # namespaced so the store's totals don't overwrite this game's
+            "stored": self.store.stats(),
+            "frames": self.store.stats()["frames"],
         }
 
     # --- ingest -------------------------------------------------------------
@@ -116,6 +130,16 @@ class LiveFeed:
                 payload.get("gameState", {}),
             )
             self.store.add_snapshot(self.game_id, self.engine.applied, self.engine.state)
+            self._orphan_diffs = 0
+            self.resyncing = False
+            return
+
+        if data.get("type") == P.MSG_GAME_DIFF and not self.engine.state:
+            # a game is running but we have no snapshot for it
+            self._orphan_diffs += 1
+            if self._orphan_diffs >= 3:
+                self._orphan_diffs = 0
+                self.request_resync()
             return
 
         if data.get("type") == P.MSG_GAME_DIFF and self.game_id:
@@ -131,6 +155,23 @@ class LiveFeed:
                 )
             if self.engine.applied % 25 == 0:
                 self.store.add_snapshot(self.game_id, self.engine.applied, self.engine.state)
+
+    def request_resync(self) -> bool:
+        """Reload the colonist tab so it re-sends a full game snapshot.
+
+        colonist only sends the full state (type 4) when the socket opens, so
+        attaching to a game already in progress leaves us with diffs we cannot
+        apply. Reloading reconnects the same seat and replays the snapshot; it
+        does not affect the game itself.
+        """
+        now = time.time()
+        if now - self._last_resync < RESYNC_COOLDOWN:  # don't thrash the page
+            return False
+        self._last_resync = now
+        self.resyncing = True
+        with self._cmd_lock:
+            self._pending_reload = True
+        return True
 
     def rebuild(self, game_id: str) -> int:
         """Re-derive state by replaying stored raw frames. Returns frames applied."""
@@ -185,8 +226,11 @@ class LiveFeed:
                 # drain any queued navigation before blocking on the next event
                 with self._cmd_lock:
                     navs, self._pending_nav = self._pending_nav, []
+                    reload_now, self._pending_reload = self._pending_reload, False
                 for url in navs:
                     await send("Page.navigate", {"url": url}, session=self._page_session)
+                if reload_now and self._page_session:
+                    await send("Page.reload", {}, session=self._page_session)
 
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=1.0)

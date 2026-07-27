@@ -577,7 +577,9 @@ async function poll() {
     state.myColor = status.my_color;
     if (!status.connected) { setLive("err", status.error ? "feed error" : "connecting…"); return; }
     if (!status.has_state) {
-      setLive("on", "connected — waiting for a game");
+      setLive("on", status.resyncing
+        ? "game in progress — resyncing…"
+        : "connected — waiting for a game");
       renderPanel(null);
       return;
     }

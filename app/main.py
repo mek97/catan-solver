@@ -207,6 +207,14 @@ def live_open(url: str) -> dict:
     return FEED.open_url(url)
 
 
+@app.post("/api/live/resync")
+def live_resync() -> dict:
+    """Force colonist to re-send a full snapshot (used when we attach mid-game)."""
+    from .live.feed import FEED
+
+    return {"requested": FEED.request_resync(), **FEED.status()}
+
+
 @app.get("/api/live/state")
 def live_state() -> dict:
     """Current reconstructed position as a solver BoardConfig."""
