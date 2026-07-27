@@ -1,0 +1,214 @@
+{
+  "hexes": [
+    {
+      "resource": "ore",
+      "number": 10
+    },
+    {
+      "resource": "sheep",
+      "number": 2
+    },
+    {
+      "resource": "wood",
+      "number": 9
+    },
+    {
+      "resource": "wheat",
+      "number": 12
+    },
+    {
+      "resource": "brick",
+      "number": 6
+    },
+    {
+      "resource": "sheep",
+      "number": 4
+    },
+    {
+      "resource": "brick",
+      "number": 10
+    },
+    {
+      "resource": "wheat",
+      "number": 9
+    },
+    {
+      "resource": "wood",
+      "number": 11
+    },
+    {
+      "resource": "desert",
+      "number": null
+    },
+    {
+      "resource": "wood",
+      "number": 3
+    },
+    {
+      "resource": "ore",
+      "number": 8
+    },
+    {
+      "resource": "wood",
+      "number": 8
+    },
+    {
+      "resource": "ore",
+      "number": 3
+    },
+    {
+      "resource": "wheat",
+      "number": 4
+    },
+    {
+      "resource": "sheep",
+      "number": 5
+    },
+    {
+      "resource": "brick",
+      "number": 5
+    },
+    {
+      "resource": "wheat",
+      "number": 6
+    },
+    {
+      "resource": "sheep",
+      "number": 11
+    }
+  ],
+  "ports": [
+    {
+      "type": "3:1",
+      "vertices": [
+        16,
+        21
+      ]
+    },
+    {
+      "type": "sheep",
+      "vertices": [
+        3,
+        7
+      ]
+    },
+    {
+      "type": "3:1",
+      "vertices": [
+        1,
+        5
+      ]
+    },
+    {
+      "type": "ore",
+      "vertices": [
+        6,
+        10
+      ]
+    },
+    {
+      "type": "wheat",
+      "vertices": [
+        20,
+        26
+      ]
+    },
+    {
+      "type": "3:1",
+      "vertices": [
+        42,
+        46
+      ]
+    },
+    {
+      "type": "wood",
+      "vertices": [
+        49,
+        53
+      ]
+    },
+    {
+      "type": "brick",
+      "vertices": [
+        48,
+        51
+      ]
+    },
+    {
+      "type": "3:1",
+      "vertices": [
+        33,
+        38
+      ]
+    }
+  ],
+  "robber_hex": 9,
+  "players": {
+    "red": {
+      "settlements": [],
+      "cities": [],
+      "roads": [],
+      "vp_visible": 0,
+      "resource_count": 0,
+      "dev_card_count": 0,
+      "knights_played": 0,
+      "longest_road": false,
+      "largest_army": false
+    },
+    "blue": {
+      "settlements": [],
+      "cities": [],
+      "roads": [],
+      "vp_visible": 0,
+      "resource_count": 0,
+      "dev_card_count": 0,
+      "knights_played": 0,
+      "longest_road": false,
+      "largest_army": false
+    },
+    "orange": {
+      "settlements": [],
+      "cities": [],
+      "roads": [],
+      "vp_visible": 0,
+      "resource_count": 0,
+      "dev_card_count": 0,
+      "knights_played": 0,
+      "longest_road": false,
+      "largest_army": false
+    },
+    "white": {
+      "settlements": [],
+      "cities": [],
+      "roads": [],
+      "vp_visible": 0,
+      "resource_count": 0,
+      "dev_card_count": 0,
+      "knights_played": 0,
+      "longest_road": false,
+      "largest_army": false
+    }
+  },
+  "me": {
+    "color": "red",
+    "hand": {
+      "wood": 0,
+      "brick": 0,
+      "sheep": 0,
+      "wheat": 0,
+      "ore": 0
+    },
+    "dev_cards": {
+      "knight": 0,
+      "road_building": 0,
+      "year_of_plenty": 0,
+      "monopoly": 0,
+      "vp": 0
+    },
+    "dev_card_bought_this_turn": false,
+    "dev_card_played_this_turn": false
+  },
+  "phase": "setup1",
+  "turn": "red",
+  "pending": null
+}

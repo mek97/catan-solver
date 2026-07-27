@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>catan-solver</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>catan<span>-solver</span></h1>
+    <div id="toolbar">
+      <div class="seg" id="modes">
+        <button data-mode="hex" class="active" title="Click a hex to edit its resource/number">Hexes</button>
+        <button data-mode="settlement" title="Click a vertex to place/remove a settlement">Settlement</button>
+        <button data-mode="city" title="Click a vertex to place/remove a city">City</button>
+        <button data-mode="road" title="Click an edge to place/remove a road">Road</button>
+        <button data-mode="robber" title="Click a hex to move the robber">Robber</button>
+      </div>
+      <div class="seg" id="colors">
+        <button data-color="red" class="swatch red active" title="red"></button>
+        <button data-color="blue" class="swatch blue" title="blue"></button>
+        <button data-color="orange" class="swatch orange" title="orange"></button>
+        <button data-color="white" class="swatch white" title="white"></button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="board-wrap">
+      <svg id="board" viewBox="-262 -248 524 496" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="hex-popover" class="hidden"></div>
+    </section>
+
+    <aside id="panel">
+      <div id="warnings" class="hidden"></div>
+
+      <details open id="live-panel">
+        <summary>Live feed</summary>
+        <div class="row">
+          <button id="live-toggle">Connect</button>
+          <span id="live-status" class="dim">off</span>
+        </div>
+        <div id="live-info" class="hidden"></div>
+        <div id="live-log" class="hidden"></div>
+      </details>
+
+      <details open>
+        <summary>Screenshot</summary>
+        <div id="dropzone">
+          <p>Drop a colonist.io screenshot here<br /><span>or click to browse</span></p>
+          <input type="file" id="file-input" accept="image/*" hidden />
+        </div>
+        <div id="parse-status" class="hidden"></div>
+      </details>
+
+      <details open>
+        <summary>Me</summary>
+        <div class="row">
+          <label>Color <select id="my-color">
+            <option>red</option><option>blue</option><option>orange</option><option>white</option>
+          </select></label>
+          <label>Phase <select id="phase">
+            <option value="setup1">setup 1</option>
+            <option value="setup2">setup 2</option>
+            <option value="main">main</option>
+          </select></label>
+          <label class="check"><input type="checkbox" id="pending-robber" /> must move robber</label>
+        </div>
+        <div class="grid5" id="hand"></div>
+        <div class="grid5" id="devcards"></div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="dev-bought" /> bought dev this turn</label>
+          <label class="check"><input type="checkbox" id="dev-played" /> played dev this turn</label>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Players</summary>
+        <table id="players-table">
+          <thead>
+            <tr><th></th><th title="visible VP">VP</th><th title="hand size">cards</th><th title="dev cards">devs</th><th title="knights played">kn</th><th>LR</th><th>LA</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </details>
+
+      <button id="solve">Solve</button>
+
+      <div id="results"></div>
+
+      <details>
+        <summary>Raw JSON</summary>
+        <textarea id="json" spellcheck="false"></textarea>
+        <button id="json-apply">Apply JSON</button>
+      </details>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
