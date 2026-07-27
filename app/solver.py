@@ -777,11 +777,39 @@ def _build_chains(ctx: Ctx, atomic: list[ScoredMove]) -> list[ScoredMove]:
     return out
 
 
+def _starting_cards(ctx: Ctx, vid: int) -> dict[str, int]:
+    """Cards the *second* settlement pays out immediately, per the setup rules.
+
+    One card per adjacent resource hex (the desert pays nothing). The first
+    settlement pays nothing at all.
+    """
+    cards: dict[str, int] = {}
+    for h in board.VERTEX_HEXES[vid]:
+        tile = ctx.cfg.hexes[h]
+        if tile.resource != "desert" and tile.number is not None:
+            cards[tile.resource] = cards.get(tile.resource, 0) + 1
+    return cards
+
+
+def _opening_build(cards: dict[str, int]) -> tuple[float, str]:
+    """What those starting cards let you do on turn one."""
+    if _afford(cards, COSTS["settlement"]):
+        return 3.0, "and pays a full settlement on turn one"
+    if _afford(cards, COSTS["city"]):
+        return 2.5, "and pays a city on turn one"
+    if _afford(cards, COSTS["road"]):
+        return 1.5, "and pays a road immediately"
+    if _afford(cards, COSTS["dev"]):
+        return 1.2, "and pays a development card immediately"
+    return 0.0, ""
+
+
 def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     cfg = ctx.cfg
     my_p = cfg.players[cfg.me.color]
+    second = cfg.phase == "setup2"
     first_numbers: set[int] = set()
-    if cfg.phase == "setup2" and my_p.settlements:
+    if second and my_p.settlements:
         for h in board.VERTEX_HEXES[my_p.settlements[0]]:
             if cfg.hexes[h].number is not None:
                 first_numbers.add(cfg.hexes[h].number)
@@ -792,11 +820,25 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
         prod = vertex_prod(ctx, vid)
         port, port_note = _port_bonus(ctx, vid)
         expand = _expansion(ctx, vid)
-        overlap = len(
-            {cfg.hexes[h].number for h in board.VERTEX_HEXES[vid] if cfg.hexes[h].number}
-            & first_numbers
+        # Doubling up on a number is worse the better the number is: two 8s
+        # boom and bust together, two 12s barely matter.
+        shared = {
+            cfg.hexes[h].number for h in board.VERTEX_HEXES[vid] if cfg.hexes[h].number
+        } & first_numbers
+        overlap = len(shared)
+        overlap_cost = sum(PIPS.get(n, 0) for n in shared) * 0.35
+
+        # only the second settlement pays out, so only it gets the bonus
+        opening, opening_note = (0.0, "")
+        cards: dict[str, int] = {}
+        if second:
+            cards = _starting_cards(ctx, vid)
+            opening, opening_note = _opening_build(cards)
+
+        score = (
+            W["prod"] * prod * 1.2 + W["port"] * port + W["expand"] * expand
+            - overlap_cost + opening
         )
-        score = W["prod"] * prod * 1.2 + W["port"] * port + W["expand"] * expand - 0.5 * overlap
         # free road: point at the best placeable vertex one step beyond
         best_edge, best_val = None, -1.0
         for e in board.VERTEX_EDGES[vid]:
@@ -823,8 +865,14 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
         bits = [f"{_raw_pips(ctx, vid)} pips ({', '.join(new_res)})"]
         if port_note:
             bits.append(port_note)
+        if second and cards:
+            starting = ", ".join(f"{n} {r}" for r, n in sorted(cards.items()))
+            bits.append(f"starts you with {starting}" + (f" {opening_note}" if opening_note else ""))
         if overlap:
-            bits.append(f"note: {overlap} number(s) overlap your first settlement")
+            bits.append(
+                f"note: {overlap} number(s) overlap your first settlement "
+                f"({', '.join(str(n) for n in sorted(shared))})"
+            )
         moves.append(
             ScoredMove(
                 steps=steps,
