@@ -180,6 +180,15 @@ def live_status() -> dict:
     return FEED.status()
 
 
+@app.post("/api/live/open")
+def live_open(url: str) -> dict:
+    """Point the attached Chrome at a colonist URL (game link or lobby)."""
+    from .live.feed import FEED
+
+    FEED.start()
+    return FEED.open_url(url)
+
+
 @app.get("/api/live/state")
 def live_state() -> dict:
     """Current reconstructed position as a solver BoardConfig."""

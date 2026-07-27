@@ -12,7 +12,7 @@ RESOURCES = ["wood", "brick", "sheep", "wheat", "ore"]
 
 Resource = Literal["wood", "brick", "sheep", "wheat", "ore"]
 HexResource = Literal["wood", "brick", "sheep", "wheat", "ore", "desert"]
-Color = Literal["red", "blue", "orange", "white"]
+Color = Literal["red", "blue", "orange", "green"]
 PortType = Literal["3:1", "wood", "brick", "sheep", "wheat", "ore"]
 
 # standard base-game distributions, used for soft warnings only

@@ -48,7 +48,7 @@ def main() -> None:
                 "vp_visible": 0, "resource_count": 0, "dev_card_count": 0,
                 "knights_played": 0, "longest_road": False, "largest_army": False,
             }
-            for c in ("red", "blue", "orange", "white")
+            for c in ("red", "blue", "orange", "green")
         },
         "me": {
             "color": "red",

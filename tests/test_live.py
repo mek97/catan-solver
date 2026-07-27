@@ -123,7 +123,7 @@ def test_engine_replay_produces_valid_board():
     assert eng.state, "no snapshot applied"
     cfg = eng.board_config()
     assert len(cfg.hexes) == 19
-    assert cfg.me.color in ("red", "blue", "orange", "white")
+    assert cfg.me.color in ("red", "blue", "orange", "green")
     # every placed piece resolved to a canonical id in range
     for p in cfg.players.values():
         assert all(0 <= v < 54 for v in p.settlements + p.cities)

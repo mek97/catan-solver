@@ -25,8 +25,21 @@ from .. import board
 
 RESOURCE = {0: "desert", 1: "wood", 2: "brick", 3: "sheep", 4: "wheat", 5: "ore"}
 CARD = {1: "wood", 2: "brick", 3: "sheep", 4: "wheat", 5: "ore"}
-# colonist player colors -> our palette (order confirmed from playOrder/UI)
-COLOR = {1: "red", 2: "blue", 3: "orange", 4: "white"}
+# colonist player colors. Ids 1-4 are the standard palette, confirmed from the
+# lobby's availableColors ["red","blue","orange","green"]. Other ids appear in
+# tutorial//special modes; map_color() folds them into the four we model so an
+# odd id can never break BoardConfig validation.
+COLOR = {1: "red", 2: "blue", 3: "orange", 4: "green"}
+PALETTE = ["red", "blue", "orange", "green"]
+
+
+def map_color(color_id: Any) -> Optional[str]:
+    """colonist color id -> one of our four colors (stable, never None for ints)."""
+    if not isinstance(color_id, int):
+        return None
+    if color_id in COLOR:
+        return COLOR[color_id]
+    return PALETTE[(color_id - 1) % len(PALETTE)]
 
 BUILDING = {1: "settlement", 2: "city"}
 PIECE = {0: "road", 2: "settlement", 3: "city", 5: "robber"}
@@ -153,7 +166,7 @@ def describe_log(entry: dict) -> Optional[dict]:
     kind = LOG.get(text.get("type"), f"log_{text.get('type')}")
     ev: dict[str, Any] = {"kind": kind}
     if "playerColor" in text:
-        ev["color"] = COLOR.get(text["playerColor"], text["playerColor"])
+        ev["color"] = map_color(text["playerColor"])
     if kind == "dice_rolled":
         ev["dice"] = [text.get("firstDice"), text.get("secondDice")]
         ev["total"] = (text.get("firstDice") or 0) + (text.get("secondDice") or 0)
@@ -170,7 +183,7 @@ def describe_log(entry: dict) -> Optional[dict]:
     elif kind in ("card_stolen", "cards_discarded"):
         ev["cards"] = [CARD.get(c, c) for c in text.get("cardEnums", [])]
     elif kind == "trade_player":
-        ev["with"] = COLOR.get(text.get("acceptingPlayerColor"))
+        ev["with"] = map_color(text.get("acceptingPlayerColor"))
         ev["gave"] = [CARD.get(c, c) for c in text.get("givenCardEnums", [])]
         ev["got"] = [CARD.get(c, c) for c in text.get("receivedCardEnums", [])]
     elif kind == "trade_bank":

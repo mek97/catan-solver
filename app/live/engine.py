@@ -61,11 +61,11 @@ class GameEngine:
 
     @property
     def my_color(self) -> str:
-        return P.COLOR.get(self.my_color_id or 1, "red")
+        return P.map_color(self.my_color_id) or "red"
 
     def current_turn(self) -> Optional[str]:
         c = (self.state.get("currentState") or {}).get("currentTurnPlayerColor")
-        return P.COLOR.get(c) if c else None
+        return P.map_color(c) if c else None
 
     def is_my_turn(self) -> bool:
         cur = (self.state.get("currentState") or {}).get("currentTurnPlayerColor")
@@ -140,7 +140,7 @@ class GameEngine:
             cards = (ps.get("resourceCards") or {}).get("cards") or []
             out.append(
                 {
-                    "color": P.COLOR.get(colid, str(colid)),
+                    "color": P.map_color(colid) or str(colid),
                     "is_me": colid == self.my_color_id,
                     "vp_visible": sum(v for v in vps.values() if isinstance(v, int)),
                     "settlements": settlements,
@@ -166,14 +166,14 @@ class GameEngine:
                 resource=res, number=None if res == "desert" else num
             )
 
-        players: dict[str, PlayerState] = {c: PlayerState() for c in P.COLOR.values()}
+        players: dict[str, PlayerState] = {c: PlayerState() for c in P.PALETTE}
         for cid_, c in (ms.get("tileCornerStates") or {}).items():
             if not isinstance(c, dict) or not c.get("owner"):
                 continue
             vid = self.maps["corners"].get(str(cid_))
             if vid is None:
                 continue
-            color = P.COLOR.get(c["owner"])
+            color = P.map_color(c["owner"])
             if not color:
                 continue
             if c.get("buildingType") == 2:
@@ -184,12 +184,12 @@ class GameEngine:
             if not isinstance(e, dict) or not e.get("owner"):
                 continue
             ceid = self.maps["edges"].get(str(eid))
-            color = P.COLOR.get(e["owner"])
+            color = P.map_color(e["owner"])
             if ceid is not None and color:
                 players[color].roads.append(ceid)
 
         for cid, ps in (self.state.get("playerStates") or {}).items():
-            color = P.COLOR.get(int(cid)) if str(cid).isdigit() else None
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
             if not color:
                 continue
             vps = ps.get("victoryPointsState") or {}
@@ -199,12 +199,12 @@ class GameEngine:
             )
         longest = (self.state.get("mechanicLongestRoadState") or {})
         for cid, v in longest.items():
-            color = P.COLOR.get(int(cid)) if str(cid).isdigit() else None
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
             if color and isinstance(v, dict) and v.get("hasLongestRoad"):
                 players[color].longest_road = True
         army = (self.state.get("mechanicLargestArmyState") or {})
         for cid, v in army.items():
-            color = P.COLOR.get(int(cid)) if str(cid).isdigit() else None
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
             if color and isinstance(v, dict):
                 if v.get("hasLargestArmy"):
                     players[color].largest_army = True

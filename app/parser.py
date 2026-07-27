@@ -29,7 +29,7 @@ MODEL = "claude-opus-5"
 
 Corner = Literal["N", "NE", "SE", "S", "SW", "NW"]
 EdgeDir = Literal["NE", "E", "SE", "SW", "W", "NW"]
-ColorName = Literal["red", "blue", "orange", "white"]
+ColorName = Literal["red", "blue", "orange", "green"]
 
 
 class RawHex(BaseModel):
@@ -89,7 +89,7 @@ class RawBoard(BaseModel):
     red: RawPlayerPieces = Field(default_factory=RawPlayerPieces)
     blue: RawPlayerPieces = Field(default_factory=RawPlayerPieces)
     orange: RawPlayerPieces = Field(default_factory=RawPlayerPieces)
-    white: RawPlayerPieces = Field(default_factory=RawPlayerPieces)
+    green: RawPlayerPieces = Field(default_factory=RawPlayerPieces)
     players: list[RawPanel] = Field(default_factory=list)
     my_hand: RawHand = Field(default_factory=RawHand)
     my_color: Optional[ColorName] = Field(
@@ -118,7 +118,7 @@ Report, using 0-based row (top to bottom) and pos (left to right within the row)
 2. robber: the hex the grey robber piece stands on.
 3. ports: for each port icon in the water, the land hex it attaches to, the
    side of that hex it touches (NE/E/SE/SW/W/NW), and its type.
-4. For each player color (red, blue, orange, white): settlements (small house),
+4. For each player color (red, blue, orange, green): settlements (small house),
    cities (larger building), each as the hex it most clearly sits on plus the
    corner (N/NE/SE/S/SW/NW); roads as hex plus edge side (NE/E/SE/SW/W/NW).
 5. players: each player panel's visible victory points, hand-card count,
@@ -202,10 +202,10 @@ Respond with ONLY a JSON object of exactly this shape (no prose, no fences):
   "red":    {"settlements": [{"row": R, "pos": P, "corner": "N|NE|SE|S|SW|NW"}], "cities": [...same shape...], "roads": [{"row": R, "pos": P, "edge": "NE|E|SE|SW|W|NW"}]},
   "blue":   {...same shape as red...},
   "orange": {...},
-  "white":  {...},
+  "green":  {...},
   "players": [{"color": "red", "vp": 0, "resource_count": 0, "dev_card_count": 0, "knights_played": 0, "longest_road": false, "largest_army": false}, ...one per visible player...],
   "my_hand": {"wood": 0, "brick": 0, "sheep": 0, "wheat": 0, "ore": 0},
-  "my_color": "red|blue|orange|white" or null,
+  "my_color": "red|blue|orange|green" or null,
   "uncertain": ["notes about anything unreadable"]
 }
 Omit list entries you cannot read rather than guessing."""
@@ -314,7 +314,7 @@ def resolve_raw(raw: RawBoard) -> tuple[BoardConfig, list[str]]:
     players: dict[str, PlayerState] = {}
     occupied_v: set[int] = set()
     occupied_e: set[int] = set()
-    for color in ("red", "blue", "orange", "white"):
+    for color in ("red", "blue", "orange", "green"):
         pieces: RawPlayerPieces = getattr(raw, color)
         state = PlayerState()
         for kind, out in (("settlements", state.settlements), ("cities", state.cities)):

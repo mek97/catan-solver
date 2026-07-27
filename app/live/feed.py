@@ -39,6 +39,29 @@ class LiveFeed:
         self.error: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._page_session: Optional[str] = None
+        self._pending_nav: list[str] = []
+        self._cmd_lock = threading.Lock()
+
+    # --- driving the attached browser ---------------------------------------
+
+    def open_url(self, url: str) -> dict[str, Any]:
+        """Point the attached Chrome at a URL (e.g. a colonist game link).
+
+        Falls back to the CDP HTTP API (which opens a new tab) when no page
+        session is attached yet, so this works even before the first frame.
+        """
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url.lstrip("/")
+        if self._page_session:
+            with self._cmd_lock:
+                self._pending_nav.append(url)
+            return {"navigated": url, "via": "session"}
+        try:
+            requests.put(f"{CDP_HTTP}/json/new?{url}", timeout=5)
+            return {"navigated": url, "via": "new-tab"}
+        except Exception as exc:
+            return {"error": f"could not open {url}: {exc}"}
 
     # --- status -------------------------------------------------------------
 
@@ -158,17 +181,32 @@ class LiveFeed:
             await send("Target.setDiscoverTargets", {"discover": True})
 
             while not self._stop.is_set():
-                raw = await ws.recv()
+                # drain any queued navigation before blocking on the next event
+                with self._cmd_lock:
+                    navs, self._pending_nav = self._pending_nav, []
+                for url in navs:
+                    await send("Page.navigate", {"url": url}, session=self._page_session)
+
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
                 msg = json.loads(raw)
                 method, params = msg.get("method", ""), msg.get("params", {})
                 if method == "Target.attachedToTarget":
                     sid = params["sessionId"]
+                    info = params.get("targetInfo") or {}
                     await send("Network.enable", {}, session=sid)
                     await send(
                         "Target.setAutoAttach",
                         {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
                         session=sid,
                     )
+                    if info.get("type") == "page":
+                        await send("Page.enable", {}, session=sid)
+                        # prefer a colonist tab; otherwise hold the first page
+                        if COLONIST_WS.split(".")[-2] in (info.get("url") or "") or not self._page_session:
+                            self._page_session = sid
                 elif method == "Network.webSocketCreated":
                     ws_urls[params["requestId"]] = params.get("url", "")
                 elif method in (

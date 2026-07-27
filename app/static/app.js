@@ -1,665 +1,371 @@
-/* catan-solver UI. Geometry comes from /api/geometry verbatim -- this file
-   never computes hex math, so frontend and backend can't disagree on IDs. */
+/* catan-solver — live dashboard.
+   Board geometry comes from /api/geometry verbatim; position, moves, and log
+   come from the live colonist feed. Advisory only: nothing is ever clicked. */
 
-const RESOURCES = ["wood", "brick", "sheep", "wheat", "ore"];
-const DEVS = ["knight", "road_building", "year_of_plenty", "monopoly", "vp"];
-const DEV_LABELS = { knight: "knight", road_building: "roads", year_of_plenty: "YoP", monopoly: "mono", vp: "VP" };
-const COLORS = ["red", "blue", "orange", "white"];
-const HEX_RESOURCES = ["wood", "brick", "sheep", "wheat", "ore", "desert"];
-const NUMBERS = [2, 3, 4, 5, 6, 8, 9, 10, 11, 12];
+const COLORS = ["red", "blue", "orange", "green"];
 const PIP_DOTS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 
-const state = {
-  geometry: null,
-  config: null,
-  mode: "hex",
-  activeColor: "red",
-  results: [],
-};
+const state = { geometry: null, config: null, rec: null, myColor: null, on: true, timer: null };
 
-const $ = (sel) => document.querySelector(sel);
-const svgEl = (tag, attrs = {}) => {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  return el;
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}) => {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
 };
-
-/* ---------------- api ---------------- */
 
 async function getJSON(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `${r.status}`);
   return r.json();
 }
 
-async function sendJSON(url, method, body) {
-  const r = await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || `${url}: ${r.status}`);
-  return data;
-}
+/* ---------------- hex art ---------------- */
 
-let pushTimer = null;
-function schedulePush() {
-  clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    sendJSON("/api/config", "PUT", state.config).catch(() => {});
-  }, 600);
-}
-
-function touched() {
-  syncJsonTab();
-  schedulePush();
-  renderBoard();
-}
-
-/* ---------------- board rendering ---------------- */
-
-function pieceOwner(kind, id) {
-  for (const color of COLORS) {
-    const p = state.config.players[color];
-    if (!p) continue;
-    if (kind === "settlement" && p.settlements.includes(id)) return color;
-    if (kind === "city" && p.cities.includes(id)) return color;
-    if (kind === "road" && p.roads.includes(id)) return color;
-  }
-  return null;
-}
-
-function removePiece(kind, id) {
-  for (const color of COLORS) {
-    const p = state.config.players[color];
-    if (!p) continue;
-    if (kind === "road") p.roads = p.roads.filter((e) => e !== id);
-    else {
-      p.settlements = p.settlements.filter((v) => v !== id);
-      p.cities = p.cities.filter((v) => v !== id);
+function hexIcon(resource, cx, cy) {
+  const g = el("g", { class: "hex-icon" });
+  const put = (tag, attrs, cls) => {
+    const n = el(tag, attrs);
+    n.setAttribute("class", `hex-icon ${cls}`);
+    g.appendChild(n);
+  };
+  if (resource === "wood") {
+    put("path", { d: `M ${cx} ${cy - 20} l 9 15 h -18 z` }, "dark");
+    put("path", { d: `M ${cx} ${cy - 11} l 11 17 h -22 z` }, "dark");
+    put("rect", { x: cx - 2, y: cy + 6, width: 4, height: 7 }, "dark");
+  } else if (resource === "sheep") {
+    put("ellipse", { cx: cx - 2, cy: cy, rx: 15, ry: 10 }, "light");
+    put("circle", { cx: cx + 12, cy: cy - 4, r: 6 }, "light");
+  } else if (resource === "wheat") {
+    put("rect", { x: cx - 1.5, y: cy - 16, width: 3, height: 30, rx: 1.5 }, "dark");
+    for (let i = 0; i < 3; i++) {
+      const y = cy - 12 + i * 8;
+      put("ellipse", { cx: cx - 7, cy: y, rx: 6, ry: 3, transform: `rotate(-28 ${cx - 7} ${y})` }, "dark");
+      put("ellipse", { cx: cx + 7, cy: y, rx: 6, ry: 3, transform: `rotate(28 ${cx + 7} ${y})` }, "dark");
     }
+  } else if (resource === "brick") {
+    for (let r = 0; r < 3; r++) {
+      const off = r % 2 ? -7 : 0;
+      for (let c = 0; c < 2; c++) {
+        put("rect", {
+          x: cx - 16 + off + c * 17, y: cy - 14 + r * 10,
+          width: 14, height: 7.5, rx: 1.5,
+        }, "clay");
+      }
+    }
+  } else if (resource === "ore") {
+    put("path", { d: `M ${cx - 16} ${cy + 10} l 9 -17 l 9 17 z` }, "stone");
+    put("path", { d: `M ${cx - 3} ${cy + 10} l 11 -21 l 11 21 z` }, "stone");
+  } else if (resource === "desert") {
+    put("rect", { x: cx - 2.5, y: cy - 16, width: 5, height: 28, rx: 2.5 }, "dark");
+    put("path", { d: `M ${cx - 2} ${cy - 4} h -8 v -8`, fill: "none", stroke: "#1c3a22", "stroke-width": 4.5 }, "dark");
+    put("path", { d: `M ${cx + 2} ${cy - 8} h 8 v -6`, fill: "none", stroke: "#1c3a22", "stroke-width": 4.5 }, "dark");
   }
+  return g;
 }
 
 function renderBoard() {
   const svg = $("#board");
   svg.replaceChildren();
-  const g = state.geometry;
-  const cfg = state.config;
+  const g = state.geometry, cfg = state.config;
   if (!g || !cfg) return;
 
-  const layerHex = svgEl("g");
-  const layerPort = svgEl("g");
-  const layerPiece = svgEl("g");
-  const layerHl = svgEl("g", { class: "hl", id: "hl-layer" });
-  const layerHit = svgEl("g");
+  const sand = el("g"), tiles = el("g"), ports = el("g");
+  const pieces = el("g"), hints = el("g", { class: "hint", id: "hints" });
 
-  // hexes + tokens + robber
+  // beach: slightly larger hexes behind the tiles
   for (const h of g.hexes) {
-    const tile = cfg.hexes[h.id];
-    layerHex.appendChild(
-      svgEl("polygon", { points: h.points, class: `hex ${tile.resource}` })
-    );
-    if (tile.number) {
-      const token = svgEl("g", { class: "token" });
-      token.appendChild(svgEl("circle", { cx: h.cx, cy: h.cy, r: 15 }));
-      const t = svgEl("text", {
-        x: h.cx,
-        y: h.cy + 5,
-        class: tile.number === 6 || tile.number === 8 ? "hot" : "",
-      });
-      t.textContent = tile.number;
-      token.appendChild(t);
-      const dots = svgEl("text", { x: h.cx, y: h.cy + 12, class: "pipdots" });
-      dots.textContent = "•".repeat(PIP_DOTS[tile.number] || 0);
-      token.appendChild(dots);
-      layerHex.appendChild(token);
+    const p = el("polygon", { points: h.points, class: "hex-sand" });
+    p.setAttribute("transform", `translate(${h.cx} ${h.cy}) scale(1.14) translate(${-h.cx} ${-h.cy})`);
+    sand.appendChild(p);
+  }
+
+  for (const h of g.hexes) {
+    const t = cfg.hexes[h.id];
+    tiles.appendChild(el("polygon", { points: h.points, class: `hex ${t.resource}` }));
+    tiles.appendChild(hexIcon(t.resource, h.cx, h.cy));
+    if (t.number) {
+      const tok = el("g", { class: "token" });
+      tok.appendChild(el("circle", { cx: h.cx, cy: h.cy, r: 16 }));
+      const hot = t.number === 6 || t.number === 8;
+      const num = el("text", { x: h.cx, y: h.cy + 3, class: `num${hot ? " hot" : ""}` });
+      num.textContent = t.number;
+      tok.appendChild(num);
+      const pips = el("text", { x: h.cx, y: h.cy + 12, class: `pips${hot ? " hot" : ""}` });
+      pips.textContent = "•".repeat(PIP_DOTS[t.number] || 0);
+      tok.appendChild(pips);
+      tiles.appendChild(tok);
     }
     if (cfg.robber_hex === h.id) {
-      layerHex.appendChild(
-        svgEl("ellipse", { cx: h.cx + 20, cy: h.cy - 16, rx: 8, ry: 11, class: "robber" })
-      );
+      const r = el("g");
+      r.appendChild(el("ellipse", { cx: h.cx + 22, cy: h.cy - 12, rx: 7, ry: 9, class: "robber" }));
+      r.appendChild(el("rect", { x: h.cx + 17, y: h.cy - 4, width: 10, height: 12, rx: 3, class: "robber" }));
+      tiles.appendChild(r);
     }
   }
 
-  // ports
   for (const port of cfg.ports || []) {
     const [a, b] = port.vertices;
     const va = g.vertices[a], vb = g.vertices[b];
+    if (!va || !vb) continue;
     const mx = (va.x + vb.x) / 2, my = (va.y + vb.y) / 2;
     const len = Math.hypot(mx, my) || 1;
-    const px = mx + (mx / len) * 30, py = my + (my / len) * 30;
-    const badge = svgEl("g", { class: "port-badge" });
-    const label = port.type === "3:1" ? "3:1" : `2:1 ${port.type}`;
-    const w = label.length * 6.4 + 10;
-    badge.appendChild(svgEl("rect", { x: px - w / 2, y: py - 9, width: w, height: 17, rx: 4 }));
-    const t = svgEl("text", { x: px, y: py + 4 });
-    t.textContent = label;
-    badge.appendChild(t);
-    for (const v of [a, b]) {
-      layerPort.appendChild(
-        svgEl("line", {
-          x1: px, y1: py, x2: g.vertices[v].x, y2: g.vertices[v].y,
-          stroke: "#3d5a77", "stroke-width": 1.2, "stroke-dasharray": "3 3",
-        })
-      );
+    const px = mx + (mx / len) * 34, py = my + (my / len) * 34;
+    ports.appendChild(el("line", { x1: px, y1: py, x2: va.x, y2: va.y, class: "port-line" }));
+    ports.appendChild(el("line", { x1: px, y1: py, x2: vb.x, y2: vb.y, class: "port-line" }));
+    const badge = el("g", { class: "port-badge" });
+    const label = port.type === "3:1" ? "3:1" : `2:1`;
+    badge.appendChild(el("rect", { x: px - 15, y: py - 10, width: 30, height: 19, rx: 5 }));
+    const t1 = el("text", { x: px, y: py - 1 }); t1.textContent = label;
+    badge.appendChild(t1);
+    if (port.type !== "3:1") {
+      const t2 = el("text", { x: px, y: py + 7 }); t2.textContent = port.type.slice(0, 5);
+      badge.appendChild(t2);
     }
-    layerPort.appendChild(badge);
+    ports.appendChild(badge);
   }
 
-  // roads then buildings
-  for (const e of g.edges) {
-    const owner = pieceOwner("road", e.id);
-    if (owner) {
-      layerPiece.appendChild(
-        svgEl("line", {
-          x1: e.x1 + (e.x2 - e.x1) * 0.18, y1: e.y1 + (e.y2 - e.y1) * 0.18,
-          x2: e.x1 + (e.x2 - e.x1) * 0.82, y2: e.y1 + (e.y2 - e.y1) * 0.82,
-          class: `road-piece ${owner}`,
-        })
-      );
+  const owner = (kind, id) => {
+    for (const c of COLORS) {
+      const p = cfg.players[c];
+      if (!p) continue;
+      if (kind === "road" && p.roads.includes(id)) return c;
+      if (kind === "s" && p.settlements.includes(id)) return c;
+      if (kind === "c" && p.cities.includes(id)) return c;
     }
+    return null;
+  };
+
+  for (const e of g.edges) {
+    const o = owner("road", e.id);
+    if (!o) continue;
+    const x1 = e.x1 + (e.x2 - e.x1) * 0.16, y1 = e.y1 + (e.y2 - e.y1) * 0.16;
+    const x2 = e.x1 + (e.x2 - e.x1) * 0.84, y2 = e.y1 + (e.y2 - e.y1) * 0.84;
+    pieces.appendChild(el("line", { x1, y1, x2, y2, class: "road-shadow" }));
+    pieces.appendChild(el("line", { x1, y1, x2, y2, class: `road ${o}` }));
   }
   for (const v of g.vertices) {
-    const s = pieceOwner("settlement", v.id);
-    const c = pieceOwner("city", v.id);
+    const s = owner("s", v.id), c = owner("c", v.id);
     if (s) {
-      layerPiece.appendChild(
-        svgEl("path", {
-          d: `M ${v.x - 8} ${v.y + 7} v -9 l 8 -7 l 8 7 v 9 z`,
-          class: `piece ${s}`,
-        })
-      );
+      pieces.appendChild(el("path", {
+        d: `M ${v.x - 9} ${v.y + 8} v -10 l 9 -8 l 9 8 v 10 z`, class: `piece ${s}`,
+      }));
     } else if (c) {
-      layerPiece.appendChild(
-        svgEl("path", {
-          d: `M ${v.x - 11} ${v.y + 8} v -12 l 6 -5 l 6 5 v 3 h 10 v 9 z`,
-          class: `piece ${c}`,
-        })
-      );
+      pieces.appendChild(el("path", {
+        d: `M ${v.x - 13} ${v.y + 9} v -13 l 7 -6 l 7 6 v 4 h 12 v 9 z`, class: `piece ${c}`,
+      }));
     }
   }
 
-  // hit targets
-  for (const h of g.hexes) {
-    const hit = svgEl("polygon", { points: h.points, class: "hit hit-hex" });
-    hit.addEventListener("click", (ev) => onHexClick(h, ev));
-    layerHit.appendChild(hit);
-  }
-  for (const v of g.vertices) {
-    const hit = svgEl("circle", { cx: v.x, cy: v.y, r: 11, class: "hit hit-vertex" });
-    hit.addEventListener("click", () => onVertexClick(v.id));
-    layerHit.appendChild(hit);
-  }
-  for (const e of g.edges) {
-    const hit = svgEl("line", { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2, class: "hit hit-edge" });
-    hit.addEventListener("click", () => onEdgeClick(e.id));
-    layerHit.appendChild(hit);
-  }
-
-  svg.append(layerHex, layerPort, layerPiece, layerHl, layerHit);
+  svg.append(sand, tiles, ports, pieces, hints);
+  drawHint(state.rec?.moves?.[0]);
 }
 
-/* ---------------- board interaction ---------------- */
-
-function onHexClick(h, ev) {
-  if (state.mode === "robber") {
-    state.config.robber_hex = h.id;
-    touched();
-    return;
-  }
-  if (state.mode !== "hex") return;
-  const pop = $("#hex-popover");
-  pop.replaceChildren();
-  const tile = state.config.hexes[h.id];
-  const grid = document.createElement("div");
-  grid.className = "res-grid";
-  const fills = {
-    wood: "#2c7a3f", sheep: "#93c74e", wheat: "#dfb02f",
-    brick: "#c05f30", ore: "#7e8896", desert: "#d5c088",
-  };
-  for (const res of HEX_RESOURCES) {
-    const b = document.createElement("button");
-    b.textContent = res;
-    b.style.background = fills[res];
-    if (res === tile.resource) b.style.outline = "2px solid #e8b93c";
-    b.onclick = () => {
-      tile.resource = res;
-      if (res === "desert") tile.number = null;
-      touched();
-      pop.classList.add("hidden");
-    };
-    grid.appendChild(b);
-  }
-  pop.appendChild(grid);
-  const sel = document.createElement("select");
-  sel.innerHTML =
-    '<option value="">no token</option>' +
-    NUMBERS.map((n) => `<option ${n === tile.number ? "selected" : ""}>${n}</option>`).join("");
-  sel.onchange = () => {
-    tile.number = sel.value ? Number(sel.value) : null;
-    if (tile.number) tile.resource = tile.resource === "desert" ? "wheat" : tile.resource;
-    touched();
-    pop.classList.add("hidden");
-  };
-  pop.appendChild(sel);
-
-  const wrap = $("#board-wrap").getBoundingClientRect();
-  pop.style.left = Math.min(ev.clientX - wrap.left + 10, wrap.width - 225) + "px";
-  pop.style.top = Math.min(ev.clientY - wrap.top + 10, wrap.height - 150) + "px";
-  pop.classList.remove("hidden");
-}
-
-function onVertexClick(vid) {
-  if (state.mode !== "settlement" && state.mode !== "city") return;
-  const key = state.mode === "settlement" ? "settlements" : "cities";
-  const had = state.config.players[state.activeColor][key].includes(vid);
-  removePiece("settlement", vid); // clears any building there (replaces the arrays)
-  if (!had) state.config.players[state.activeColor][key].push(vid);
-  touched();
-}
-
-function onEdgeClick(eid) {
-  if (state.mode !== "road") return;
-  const p = state.config.players[state.activeColor];
-  if (p.roads.includes(eid)) {
-    p.roads = p.roads.filter((e) => e !== eid);
-  } else {
-    removePiece("road", eid);
-    p.roads.push(eid);
-  }
-  touched();
-}
-
-document.addEventListener("click", (ev) => {
-  const pop = $("#hex-popover");
-  if (!pop.classList.contains("hidden") && !pop.contains(ev.target) && !ev.target.closest(".hit-hex")) {
-    pop.classList.add("hidden");
-  }
-});
-
-/* ---------------- highlights ---------------- */
-
-function highlightMove(move) {
-  const layer = $("#hl-layer");
+function drawHint(move) {
+  const layer = $("#hints");
   if (!layer) return;
   layer.replaceChildren();
-  if (!move) return;
+  if (!move || !state.rec?.my_turn) return;
   const g = state.geometry;
   for (const step of move.steps) {
-    if (step.vertex != null) {
+    if (step.vertex != null && g.vertices[step.vertex]) {
       const v = g.vertices[step.vertex];
-      layer.appendChild(svgEl("circle", { cx: v.x, cy: v.y, r: 15 }));
+      layer.appendChild(el("circle", { cx: v.x, cy: v.y, r: 21, class: "halo" }));
+      layer.appendChild(el("circle", { cx: v.x, cy: v.y, r: 18 }));
     }
     for (const eid of [step.edge, ...(step.edges || [])]) {
-      if (eid == null) continue;
+      if (eid == null || !g.edges[eid]) continue;
       const e = g.edges[eid];
-      layer.appendChild(svgEl("line", { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 }));
+      layer.appendChild(el("line", { x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 }));
     }
-    if (step.robber_hex != null) {
-      const h = g.hexes[step.robber_hex];
-      layer.appendChild(svgEl("polygon", { points: h.points }));
+    if (step.robber_hex != null && g.hexes[step.robber_hex]) {
+      layer.appendChild(el("polygon", { points: g.hexes[step.robber_hex].points }));
     }
   }
 }
 
 /* ---------------- panel ---------------- */
 
-function buildPanel() {
-  const hand = $("#hand");
-  hand.replaceChildren();
-  for (const r of RESOURCES) {
-    const label = document.createElement("label");
-    label.innerHTML = `${r}<input type="number" min="0" max="30" data-res="${r}" />`;
-    hand.appendChild(label);
-  }
-  hand.addEventListener("input", (ev) => {
-    const r = ev.target.dataset.res;
-    if (r) {
-      state.config.me.hand[r] = Number(ev.target.value) || 0;
-      syncJsonTab();
-      schedulePush();
-    }
-  });
+function renderPanel(rec, status) {
+  const mine = rec?.my_turn;
+  const lbl = $("#turn-label");
+  lbl.textContent = rec ? (mine ? "YOUR TURN" : `${rec.turn ?? "…"}'s turn`) : "waiting for a game";
+  lbl.className = mine ? "mine" : "";
+  const hand = rec ? Object.entries(rec.hand).filter(([, n]) => n).map(([r, n]) => `${n} ${r}`).join(" · ") : "";
+  $("#turn-sub").textContent = rec
+    ? `${rec.phase}${hand ? " · " + hand : " · no cards"}`
+    : "start a game in the CDP browser";
 
-  const devs = $("#devcards");
-  devs.replaceChildren();
-  for (const d of DEVS) {
-    const label = document.createElement("label");
-    label.innerHTML = `${DEV_LABELS[d]}<input type="number" min="0" max="14" data-dev="${d}" />`;
-    devs.appendChild(label);
-  }
-  devs.addEventListener("input", (ev) => {
-    const d = ev.target.dataset.dev;
-    if (d) {
-      state.config.me.dev_cards[d] = Number(ev.target.value) || 0;
-      syncJsonTab();
-      schedulePush();
-    }
-  });
-
-  const tbody = $("#players-table tbody");
-  tbody.replaceChildren();
-  for (const color of COLORS) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="dot" style="background: var(--${color})"></span></td>
-      <td><input type="number" min="0" max="12" data-p="${color}" data-f="vp_visible" /></td>
-      <td><input type="number" min="0" max="30" data-p="${color}" data-f="resource_count" /></td>
-      <td><input type="number" min="0" max="25" data-p="${color}" data-f="dev_card_count" /></td>
-      <td><input type="number" min="0" max="14" data-p="${color}" data-f="knights_played" /></td>
-      <td><input type="checkbox" data-p="${color}" data-f="longest_road" /></td>
-      <td><input type="checkbox" data-p="${color}" data-f="largest_army" /></td>`;
-    tbody.appendChild(tr);
-  }
-  tbody.addEventListener("input", (ev) => {
-    const { p, f } = ev.target.dataset;
-    if (!p) return;
-    state.config.players[p][f] =
-      ev.target.type === "checkbox" ? ev.target.checked : Number(ev.target.value) || 0;
-    syncJsonTab();
-    schedulePush();
-  });
-
-  $("#my-color").addEventListener("change", (ev) => {
-    state.config.me.color = ev.target.value;
-    state.config.turn = ev.target.value;
-    touched();
-  });
-  $("#phase").addEventListener("change", (ev) => {
-    state.config.phase = ev.target.value;
-    syncJsonTab();
-    schedulePush();
-  });
-  $("#pending-robber").addEventListener("change", (ev) => {
-    state.config.pending = ev.target.checked ? "move_robber" : null;
-    syncJsonTab();
-    schedulePush();
-  });
-  $("#dev-bought").addEventListener("change", (ev) => {
-    state.config.me.dev_card_bought_this_turn = ev.target.checked;
-    syncJsonTab();
-    schedulePush();
-  });
-  $("#dev-played").addEventListener("change", (ev) => {
-    state.config.me.dev_card_played_this_turn = ev.target.checked;
-    syncJsonTab();
-    schedulePush();
-  });
-}
-
-function syncPanel() {
-  const cfg = state.config;
-  $("#my-color").value = cfg.me.color;
-  $("#phase").value = cfg.phase;
-  $("#pending-robber").checked = cfg.pending === "move_robber";
-  $("#dev-bought").checked = cfg.me.dev_card_bought_this_turn;
-  $("#dev-played").checked = cfg.me.dev_card_played_this_turn;
-  for (const input of document.querySelectorAll("#hand input")) {
-    input.value = cfg.me.hand[input.dataset.res] ?? 0;
-  }
-  for (const input of document.querySelectorAll("#devcards input")) {
-    input.value = cfg.me.dev_cards[input.dataset.dev] ?? 0;
-  }
-  for (const input of document.querySelectorAll("#players-table input")) {
-    const p = cfg.players[input.dataset.p] || {};
-    if (input.type === "checkbox") input.checked = !!p[input.dataset.f];
-    else input.value = p[input.dataset.f] ?? 0;
-  }
-}
-
-function syncJsonTab() {
-  $("#json").value = JSON.stringify(state.config, null, 2);
-}
-
-function setWarnings(warnings) {
-  const el = $("#warnings");
-  if (warnings && warnings.length) {
-    el.textContent = warnings.map((w) => `⚠ ${w}`).join("\n");
-    el.classList.remove("hidden");
+  const best = $("#best");
+  const top = rec?.moves?.[0];
+  if (top && mine) {
+    best.innerHTML = `<div class="best-card">
+      <div class="best-tag">do this</div>
+      <div class="best-hint"></div>
+      <div class="best-why"></div></div>`;
+    best.querySelector(".best-hint").textContent = top.location_hint;
+    best.querySelector(".best-why").textContent = top.reasoning;
+  } else if (top) {
+    best.innerHTML = `<div class="best-card" style="border-color:var(--line)">
+      <div class="best-tag" style="color:var(--dim)">when your turn comes</div>
+      <div class="best-hint"></div></div>`;
+    best.querySelector(".best-hint").textContent = top.location_hint;
   } else {
-    el.classList.add("hidden");
+    best.innerHTML = `<div class="best-empty">No recommendation yet.</div>`;
   }
-}
 
-/* ---------------- results ---------------- */
-
-function renderResults() {
-  const el = $("#results");
-  el.replaceChildren();
-  state.results.forEach((move, i) => {
-    const card = document.createElement("div");
-    card.className = "move";
-    card.innerHTML = `
-      <div class="head"><span class="rank">#${i + 1}</span><span class="score">score ${move.score.toFixed(1)}</span></div>
-      <div class="hint"></div>
-      <div class="why"></div>`;
-    card.querySelector(".hint").textContent = move.location_hint;
-    card.querySelector(".why").textContent = move.reasoning;
-    card.addEventListener("mouseenter", () => highlightMove(move));
-    card.addEventListener("mouseleave", () => highlightMove(null));
-    el.appendChild(card);
+  const alts = $("#alts");
+  alts.replaceChildren();
+  (rec?.moves || []).slice(1, 6).forEach((m) => {
+    const d = document.createElement("div");
+    d.className = "alt";
+    d.innerHTML = `<span class="score">${m.score.toFixed(1)}</span><span class="txt"></span>`;
+    d.querySelector(".txt").textContent = m.location_hint;
+    d.addEventListener("mouseenter", () => drawHint(m));
+    d.addEventListener("mouseleave", () => drawHint(rec.moves[0]));
+    alts.appendChild(d);
   });
-}
+  $("#alts-block").classList.toggle("hidden", !(rec?.moves?.length > 1));
 
-async function onSolve() {
-  const btn = $("#solve");
-  btn.disabled = true;
-  btn.textContent = "Solving…";
-  try {
-    const data = await sendJSON("/api/solve", "POST", state.config);
-    state.results = data.moves;
-    setWarnings(data.warnings);
-    renderResults();
-  } catch (err) {
-    setWarnings([`solve failed: ${err.message}`]);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Solve";
+  const trades = $("#trades");
+  trades.replaceChildren();
+  (rec?.trades || []).forEach((t) => {
+    const d = document.createElement("div");
+    d.className = `tip ${t.type}`;
+    d.textContent = t.text;
+    trades.appendChild(d);
+  });
+  $("#trades-block").classList.toggle("hidden", !(rec?.trades?.length));
+
+  const players = $("#players");
+  players.replaceChildren();
+  (rec?.players || []).forEach((p) => {
+    const d = document.createElement("div");
+    d.className = `pl${p.is_me ? " me" : ""}`;
+    d.innerHTML = `<span class="dot" style="background:var(--${p.color})"></span>
+      <span class="nm">${p.color}${p.is_me ? " (you)" : ""}</span>
+      <span class="st">${p.vp_visible}vp · ${p.settlements}s ${p.cities}c ${p.roads}r · ${p.cards}🂠</span>`;
+    players.appendChild(d);
+  });
+  $("#players-block").classList.toggle("hidden", !(rec?.players?.length));
+
+  const dice = $("#dice");
+  dice.replaceChildren();
+  if (rec?.dice?.rolls) {
+    const counts = rec.dice.counts;
+    const max = Math.max(1, ...Object.values(counts));
+    for (let n = 2; n <= 12; n++) {
+      const c = counts[String(n)] || 0;
+      const b = document.createElement("div");
+      b.className = "dbar";
+      b.title = `${n}: ${c} roll(s)`;
+      b.innerHTML = `<div class="bar${n === 6 || n === 8 ? " hot" : ""}" style="height:${
+        Math.round((c / max) * 30) + 2}px"></div><div class="lbl">${n}</div>`;
+      dice.appendChild(b);
+    }
   }
+  $("#dice-block").classList.toggle("hidden", !rec?.dice?.rolls);
 }
 
-/* ---------------- screenshot parsing ---------------- */
-
-async function parseFile(file) {
-  const status = $("#parse-status");
-  status.classList.remove("hidden", "err");
-  status.textContent = "Reading the board… (Claude: seconds; Codex fallback: a minute or two)";
-  const form = new FormData();
-  form.append("file", file);
-  try {
-    const r = await fetch("/api/parse", { method: "POST", body: form });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
-    state.config = data.config;
-    state.results = [];
-    renderResults();
-    syncPanel();
-    syncJsonTab();
-    renderBoard();
-    setWarnings(data.warnings);
-    status.textContent = `Parsed with ${data.backend === "codex" ? "Codex" : "Claude"}. Check the board and fix anything the vision pass missed.`;
-  } catch (err) {
-    status.classList.add("err");
-    status.textContent = `Parse failed: ${err.message}`;
-  }
-}
-
-function bindDropzone() {
-  const dz = $("#dropzone");
-  const input = $("#file-input");
-  dz.addEventListener("click", () => input.click());
-  input.addEventListener("change", () => input.files[0] && parseFile(input.files[0]));
-  dz.addEventListener("dragover", (ev) => {
-    ev.preventDefault();
-    dz.classList.add("drag");
-  });
-  dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
-  dz.addEventListener("drop", (ev) => {
-    ev.preventDefault();
-    dz.classList.remove("drag");
-    const file = ev.dataTransfer.files[0];
-    if (file) parseFile(file);
-  });
-  // paste a screenshot straight from the clipboard
-  document.addEventListener("paste", (ev) => {
-    const item = [...(ev.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
-    if (item) parseFile(item.getAsFile());
-  });
-}
-
-/* ---------------- live feed ---------------- */
-
-const live = { on: false, timer: null, lastLogId: null };
-
-function renderLiveInfo(status, rec) {
-  const info = $("#live-info");
-  info.classList.remove("hidden");
-  const turn = rec
-    ? (rec.my_turn ? '<span class="badge">YOUR TURN</span>' : `turn: ${rec.turn ?? "?"}`)
-    : "waiting for a game…";
-  const gaps = status.gaps?.length
-    ? `<div style="color:#e0a869">⚠ ${status.gaps.length} dropped event(s) — hit Rebuild</div>`
-    : "";
-  const dice = rec?.dice
-    ? `<div>rolls: ${rec.dice.rolls} · cold: ${rec.dice.coldest.join(", ")}</div>`
-    : "";
-  info.innerHTML = `
-    <div>${turn} · phase: ${rec?.phase ?? "—"} · you: ${status.my_color ?? "—"}</div>
-    <div>frames ${status.frames} · events ${status.events} · applied ${status.applied}</div>
-    ${dice}${gaps}`;
-}
-
-function renderLiveLog(events) {
-  const el = $("#live-log");
-  el.classList.remove("hidden");
+function renderLog(events) {
+  const box = $("#log");
   const fmt = (e) => {
-    const who = e.color ? `${e.color} ` : "";
+    const w = e.color ? `${e.color} ` : "";
+    const j = (a) => (a || []).join(",");
     switch (e.kind) {
-      case "dice_rolled": return `${who}rolled ${e.total}`;
-      case "piece_placed": return `${who}placed ${e.piece}`;
-      case "piece_bought": return `${who}bought ${e.piece}`;
-      case "cards_received": return `${who}got ${(e.cards || []).join(",")}`;
-      case "card_stolen": return `${who}stole ${(e.cards || []).join(",")}`;
-      case "cards_discarded": return `${who}discarded ${(e.cards || []).join(",")}`;
-      case "trade_player": return `${who}traded ${(e.gave || []).join(",")} → ${(e.got || []).join(",")} with ${e.with ?? "?"}`;
-      case "trade_bank": return `${who}bank ${(e.gave || []).join(",")} → ${(e.got || []).join(",")}`;
-      case "trade_offered": return `${who}offers ${(e.offers || []).join(",")} for ${(e.wants || []).join(",")}`;
-      case "robber_moved": return `${who}robber → ${e.tile?.number ?? "?"}-${e.tile?.resource ?? "?"}`;
-      case "turn_ended": return `— turn end —`;
-      default: return `${who}${e.kind}`;
+      case "dice_rolled": return `🎲 ${w}rolled ${e.total}`;
+      case "piece_placed": return `${w}placed ${e.piece}`;
+      case "piece_bought": return `${w}bought ${e.piece}`;
+      case "cards_received": return `${w}got ${j(e.cards)}`;
+      case "card_stolen": return `${w}stole ${j(e.cards)}`;
+      case "cards_discarded": return `${w}discarded ${j(e.cards)}`;
+      case "trade_player": return `${w}traded ${j(e.gave)} → ${j(e.got)} w/ ${e.with ?? "?"}`;
+      case "trade_bank": return `${w}bank ${j(e.gave)} → ${j(e.got)}`;
+      case "trade_offered": return `${w}offers ${j(e.offers)} for ${j(e.wants)}`;
+      case "robber_moved": return `${w}robber → ${e.tile?.number ?? "?"}-${e.tile?.resource ?? "?"}`;
+      case "turn_ended": return `———`;
+      default: return `${w}${e.kind}`;
     }
   };
-  el.innerHTML = events
-    .slice(-60)
-    .map((e) => `<div class="${e.color === state.liveMyColor ? "me" : ""}">${fmt(e)}</div>`)
-    .join("");
-  el.scrollTop = el.scrollHeight;
+  box.innerHTML = events.slice(-80).map((e) => {
+    const cls = e.color === state.myColor ? "me" : e.kind === "dice_rolled" ? "roll" : "";
+    return `<div class="${cls}">${fmt(e)}</div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+  $("#log-block").classList.toggle("hidden", !events.length);
 }
 
-async function livePoll() {
+/* ---------------- polling ---------------- */
+
+function setLive(cls, text) {
+  $("#live-dot").className = cls;
+  $("#live-text").textContent = text;
+}
+
+async function poll() {
   try {
     const status = await getJSON("/api/live/status");
-    state.liveMyColor = status.my_color;
-    $("#live-status").textContent = status.connected
-      ? (status.has_state ? "live" : "connected — waiting for game")
-      : (status.error ? "error" : "connecting…");
-    $("#live-status").className = status.connected && status.has_state ? "live" : "dim";
-
-    if (!status.has_state) { renderLiveInfo(status, null); return; }
-
-    const [stateRes, rec, log] = await Promise.all([
+    state.myColor = status.my_color;
+    if (!status.connected) { setLive("err", status.error ? "feed error" : "connecting…"); return; }
+    if (!status.has_state) {
+      setLive("on", "connected — waiting for a game");
+      renderPanel(null, status);
+      return;
+    }
+    const [st, rec, log] = await Promise.all([
       getJSON("/api/live/state"),
       getJSON("/api/live/moves"),
       getJSON("/api/live/log?limit=200"),
     ]);
-    state.config = stateRes.config;
-    syncPanel();
-    syncJsonTab();
+    state.config = st.config;
+    state.rec = rec;
     renderBoard();
-    state.results = rec.moves;
-    renderResults();
-    setWarnings([...(stateRes.warnings || []), ...rec.trades.map((t) => t.text)]);
-    renderLiveInfo(status, rec);
-    renderLiveLog(log.events);
+    renderPanel(rec, status);
+    renderLog(log.events);
+    const gaps = status.gaps?.length ? ` · ⚠ ${status.gaps.length} gap` : "";
+    setLive("on", `live · ${status.events} events${gaps}`);
   } catch (err) {
-    $("#live-status").textContent = err.message.slice(0, 60);
-    $("#live-status").className = "err";
+    setLive("err", String(err.message).slice(0, 40));
   }
 }
 
-async function toggleLive() {
-  const btn = $("#live-toggle");
-  if (live.on) {
-    live.on = false;
-    clearInterval(live.timer);
-    await fetch("/api/live/stop", { method: "POST" });
-    btn.textContent = "Connect";
-    btn.classList.remove("on");
-    $("#live-status").textContent = "off";
-    $("#live-status").className = "dim";
-    return;
+async function toggle() {
+  state.on = !state.on;
+  $("#live-toggle").textContent = state.on ? "⏸" : "▶";
+  if (state.on) {
+    await fetch("/api/live/start", { method: "POST" });
+    poll();
+    state.timer = setInterval(poll, 2000);
+  } else {
+    clearInterval(state.timer);
+    setLive("", "paused");
   }
-  live.on = true;
-  btn.textContent = "Disconnect";
-  btn.classList.add("on");
-  $("#live-status").textContent = "connecting…";
-  await fetch("/api/live/start", { method: "POST" });
-  livePoll();
-  live.timer = setInterval(livePoll, 2000);
 }
 
-/* ---------------- init ---------------- */
-
-function bindToolbar() {
-  $("#modes").addEventListener("click", (ev) => {
-    const btn = ev.target.closest("button");
-    if (!btn) return;
-    state.mode = btn.dataset.mode;
-    document.body.dataset.mode = state.mode;
-    for (const b of document.querySelectorAll("#modes button")) {
-      b.classList.toggle("active", b === btn);
-    }
-  });
-  $("#colors").addEventListener("click", (ev) => {
-    const btn = ev.target.closest("button");
-    if (!btn) return;
-    state.activeColor = btn.dataset.color;
-    for (const b of document.querySelectorAll("#colors button")) {
-      b.classList.toggle("active", b === btn);
-    }
-  });
+async function openUrl(ev) {
+  ev.preventDefault();
+  const input = $("#open-url");
+  const url = input.value.trim();
+  if (!url) return;
+  setLive("", "opening…");
+  try {
+    const r = await fetch(`/api/live/open?url=${encodeURIComponent(url)}`, { method: "POST" });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    input.blur();
+    setTimeout(poll, 2500);
+  } catch (err) {
+    setLive("err", String(err.message).slice(0, 44));
+  }
 }
 
 async function init() {
-  document.body.dataset.mode = state.mode;
-  bindToolbar();
-  bindDropzone();
-  buildPanel();
-  $("#solve").addEventListener("click", onSolve);
-  $("#live-toggle").addEventListener("click", toggleLive);
-  $("#json-apply").addEventListener("click", () => {
-    try {
-      state.config = JSON.parse($("#json").value);
-      syncPanel();
-      renderBoard();
-      schedulePush();
-      setWarnings([]);
-    } catch (err) {
-      setWarnings([`bad JSON: ${err.message}`]);
-    }
-  });
-
-  const [geometry, config] = await Promise.all([
-    getJSON("/api/geometry"),
-    getJSON("/api/config"),
-  ]);
-  state.geometry = geometry;
-  state.config = config;
-  syncPanel();
-  syncJsonTab();
-  renderBoard();
+  $("#live-toggle").addEventListener("click", toggle);
+  $("#open-bar").addEventListener("submit", openUrl);
+  state.geometry = await getJSON("/api/geometry");
+  await fetch("/api/live/start", { method: "POST" });
+  poll();
+  state.timer = setInterval(poll, 2000);
 }
 
 init();
