@@ -352,17 +352,35 @@ function renderPanel(rec, status) {
   });
   $("#trades-block").classList.toggle("hidden", !(rec?.trades?.length));
 
-  // open offers
+  // open offers, each with an accept / reject / counter verdict
   const offers = $("#offers");
   offers.replaceChildren();
-  const openOffers = rec?.offers || [];
+  const advice = rec?.offer_advice || [];
+  const mine = (rec?.offers || []).filter((o) => o.from_me);
   const doneTrades = (rec?.trade_log || []).slice().reverse();
-  openOffers.forEach((o) => {
+
+  advice.forEach((a) => {
+    const o = a.offer || {};
+    const d = document.createElement("div");
+    d.className = `offer-card ${a.verdict}`;
+    d.innerHTML = `
+      <div class="ohead">
+        <span class="dot" style="background:var(--${o.from || "line"})"></span>
+        <span class="owho">${o.from ?? "?"} wants <b>${(o.wants || []).join(", ") || "?"}</b>
+          for <b>${(o.offers || []).join(", ") || "?"}</b></span>
+        <span class="verdict ${a.verdict}">${a.verdict}</span>
+      </div>
+      <div class="owhy"></div>`;
+    d.querySelector(".owhy").textContent = a.text;
+    offers.appendChild(d);
+  });
+
+  mine.forEach((o) => {
     const d = document.createElement("div");
     d.className = "offer live";
     d.innerHTML = `<span class="dot" style="background:var(--${o.from || "line"})"></span>
-      <span>${o.from ?? "?"} offers <b>${(o.offers || []).join(", ") || "?"}</b>
-      for <b>${(o.wants || []).join(", ") || "?"}</b></span>`;
+      <span>your offer: <b>${(o.offers || []).join(", ") || "?"}</b>
+      for <b>${(o.wants || []).join(", ") || "?"}</b> — awaiting replies</span>`;
     offers.appendChild(d);
   });
   doneTrades.forEach((t) => {
@@ -376,7 +394,8 @@ function renderPanel(rec, status) {
     d.innerHTML = `<span class="dot" style="background:var(--${t.color || "line"})"></span><span>${txt}</span>`;
     offers.appendChild(d);
   });
-  $("#offers-block").classList.toggle("hidden", !(openOffers.length || doneTrades.length));
+  $("#offers-block").classList.toggle(
+    "hidden", !(advice.length || mine.length || doneTrades.length));
 
   // players: hand intel + production-by-roll
   const players = $("#players");

@@ -181,3 +181,54 @@ def test_discard_advice_halves_the_hand():
             assert n <= cfg.me.hand[res], "cannot discard cards you don't hold"
     else:
         assert adv is None
+
+
+# --- trade evaluation -------------------------------------------------------
+
+
+def test_offer_we_cannot_cover_is_rejected_as_cannot():
+    from app.live.advisor import evaluate_offer
+
+    eng = replay()
+    cfg = eng.board_config()
+    missing = next(r for r in ("ore", "brick", "wood") if cfg.me.hand.get(r, 0) == 0)
+    v = evaluate_offer(eng, cfg, {"from": "blue", "offers": ["sheep"], "wants": [missing, missing]})
+    assert v["verdict"] == "cannot"
+
+
+def test_never_trade_with_a_player_about_to_win():
+    from app.live.advisor import evaluate_offer
+
+    eng = replay()
+    cfg = eng.board_config()
+    have = next((r for r, n in cfg.me.hand.items() if n > 0), None)
+    assert have, "fixture hand should not be empty"
+    cfg.players["blue"].vp_visible = 9
+    v = evaluate_offer(eng, cfg, {"from": "blue", "offers": ["ore", "ore"], "wants": [have]})
+    assert v["verdict"] == "reject" and "9 VP" in v["text"]
+
+
+def test_every_open_offer_gets_a_usable_verdict():
+    from app.live.advisor import evaluate_offer
+
+    eng = replay()
+    cfg = eng.board_config()
+    have = next(r for r, n in cfg.me.hand.items() if n > 0)
+    for gets in (["ore"], ["brick"], ["wood"], ["wheat"]):
+        v = evaluate_offer(eng, cfg, {"from": "orange", "offers": gets, "wants": [have]})
+        assert v["verdict"] in ("accept", "reject", "counter", "cannot")
+        assert v["text"]
+        if v["verdict"] == "counter":
+            assert v["counter"]["give"] and v["counter"]["get"]
+
+
+def test_our_own_offers_are_not_self_advised():
+    from app.live.advisor import offer_advice
+
+    eng = replay()
+    cfg = eng.board_config()
+    eng.state.setdefault("tradeState", {})["activeOffers"] = {
+        "x": {"id": "x", "creator": eng.my_color_id, "offeredResources": [3],
+              "wantedResources": [5], "playerResponses": {}},
+    }
+    assert offer_advice(eng, cfg) == []

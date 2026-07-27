@@ -15,6 +15,7 @@ from .engine import GameEngine
 
 COSTS = solver.COSTS
 PIPS = solver.PIPS
+DISCARD_LIMIT = 7  # colonist's cardDiscardLimit default; a 7 halves anything above
 
 
 def _shortfall(hand: dict[str, int], cost: dict[str, int]) -> dict[str, int]:
@@ -123,6 +124,129 @@ def dice_stats(eng: GameEngine) -> dict[str, Any]:
     }
 
 
+def _hand_after(cfg: BoardConfig, give: Counter, get: Counter) -> Optional[dict[str, int]]:
+    """Resulting hand, or None if we can't cover the give side."""
+    hand = dict(cfg.me.hand)
+    for r, n in give.items():
+        if hand.get(r, 0) < n:
+            return None
+        hand[r] -= n
+    for r, n in get.items():
+        hand[r] = hand.get(r, 0) + n
+    return hand
+
+
+def _best_score(cfg: BoardConfig, hand: dict[str, int]) -> float:
+    probe = cfg.model_copy(deep=True)
+    probe.me.hand = hand  # type: ignore[assignment]
+    probe.pending = None  # score the build options, not a forced robber move
+    moves = solver.solve(probe)
+    return max((m.score for m in moves), default=0.0)
+
+
+def evaluate_offer(eng: GameEngine, cfg: BoardConfig, offer: dict[str, Any]) -> dict[str, Any]:
+    """Accept / reject / counter a trade offer, with the reason why.
+
+    The test is simple and honest: does this trade raise the score of the best
+    move available to me *this turn* by more than it plausibly helps them? A
+    trade that unlocks a build for me is good even at a poor card ratio; a
+    trade that mostly feeds the VP leader is bad even at a great one.
+    """
+    give = Counter(offer.get("wants") or [])   # what they want from me
+    get = Counter(offer.get("offers") or [])   # what they hand over
+    who = offer.get("from")
+    result: dict[str, Any] = {"id": offer.get("id"), "from": who}
+
+    hand_after = _hand_after(cfg, give, get)
+    if hand_after is None:
+        result.update(
+            verdict="cannot",
+            text=f"You don't hold {', '.join(f'{n} {r}' for r, n in give.items())}.",
+        )
+        return result
+
+    ctx = solver.build_ctx(cfg)
+    before = _best_score(cfg, dict(cfg.me.hand))
+    after = _best_score(cfg, hand_after)
+    gain = after - before
+
+    # what it costs me in production terms: giving away what I rarely make hurts
+    scarcity = sum(n * (10.0 / max(1.0, ctx.my_pips.get(r, 0.0) + 1)) for r, n in give.items())
+    relief = sum(n * (10.0 / max(1.0, ctx.my_pips.get(r, 0.0) + 1)) for r, n in get.items())
+    net = gain + (relief - scarcity) * 0.35
+
+    leader_vp = max(ctx.opp_vp.values(), default=0)
+    their_vp = ctx.opp_vp.get(who, 0) if who else 0
+    feeds_leader = who and their_vp >= max(7, leader_vp)
+
+    if feeds_leader:
+        result.update(
+            verdict="reject",
+            score=round(net, 1),
+            text=f"Reject — {who} is on {their_vp} VP. Don't hand the leader cards.",
+        )
+        return result
+
+    if gain > 0.5:
+        result.update(
+            verdict="accept",
+            score=round(net, 1),
+            text=(
+                f"Accept — giving {_fmt(give)} for {_fmt(get)} unlocks a better move "
+                f"this turn (+{gain:.1f})."
+            ),
+        )
+        return result
+
+    if net > 0:
+        result.update(
+            verdict="accept",
+            score=round(net, 1),
+            text=f"Accept — {_fmt(get)} is scarcer for you than {_fmt(give)}.",
+        )
+        return result
+
+    # would a different price make it worth it? offer what we over-produce
+    spare = sorted(
+        (r for r in RESOURCES if cfg.me.hand.get(r, 0) > 0 and r not in give),
+        key=lambda r: -ctx.my_pips.get(r, 0.0),
+    )
+    if get and spare and ctx.my_pips.get(spare[0], 0) >= 6:
+        result.update(
+            verdict="counter",
+            score=round(net, 1),
+            text=(
+                f"Counter — offer {spare[0]} instead of {_fmt(give)}; you make "
+                f"{ctx.my_pips[spare[0]]:.0f} pips of it and little of what they asked."
+            ),
+            counter={"give": {spare[0]: sum(give.values())}, "get": dict(get)},
+        )
+        return result
+
+    result.update(
+        verdict="reject",
+        score=round(net, 1),
+        text=f"Reject — {_fmt(give)} costs you more than {_fmt(get)} is worth right now.",
+    )
+    return result
+
+
+def _fmt(c: Counter) -> str:
+    return ", ".join(f"{n} {r}" for r, n in c.items()) or "nothing"
+
+
+def offer_advice(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
+    """Verdicts for every open offer that isn't ours."""
+    out = []
+    for offer in eng.trade_offers():
+        if offer.get("from_me"):
+            continue
+        ev = evaluate_offer(eng, cfg, offer)
+        ev["offer"] = offer
+        out.append(ev)
+    return out
+
+
 def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
     """Completed trades and offers, newest last."""
     kinds = ("trade_player", "trade_bank", "trade_offered")
@@ -133,7 +257,7 @@ def discard_advice(eng: GameEngine, cfg: BoardConfig) -> Optional[dict[str, Any]
     """On a 7, which cards to throw away: keep what completes the best build."""
     hand = cfg.me.hand
     total = sum(hand.values())
-    if total <= cfg.players[cfg.me.color].__dict__.get("discard_limit", 7):
+    if total <= DISCARD_LIMIT:
         return None
     to_drop = total // 2
     ctx = solver.build_ctx(cfg)
@@ -209,6 +333,7 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "players": eng.player_summary(),
         "timer": eng.turn_timer(),
         "offers": eng.trade_offers(),
+        "offer_advice": offer_advice(eng, cfg),
         "trade_log": recent_trades(eng),
         "rolls": eng.dice_history()[-24:],
     }

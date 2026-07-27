@@ -179,18 +179,29 @@ class GameEngine:
         return out
 
     def trade_offers(self) -> list[dict[str, Any]]:
-        """Open trade offers on the table right now."""
+        """Open trade offers on the table right now.
+
+        `offers` is what the creator gives away, `wants` is what they ask for —
+        so from our side, accepting means giving `wants` and receiving `offers`.
+        """
         offers = (self.state.get("tradeState") or {}).get("activeOffers") or {}
         out = []
         for oid, o in offers.items():
             if not isinstance(o, dict):
                 continue
+            creator = o.get("creator")
+            responses = o.get("playerResponses") or {}
             out.append(
                 {
-                    "id": oid,
-                    "from": P.map_color(o.get("creator") or o.get("playerColor")),
-                    "offers": [P.CARD.get(c, c) for c in (o.get("offeredResources") or o.get("offeredCardEnums") or [])],
-                    "wants": [P.CARD.get(c, c) for c in (o.get("wantedResources") or o.get("wantedCardEnums") or [])],
+                    "id": o.get("id", oid),
+                    "from": P.map_color(creator),
+                    "from_me": creator == self.my_color_id,
+                    "offers": [P.CARD.get(c, c) for c in (o.get("offeredResources") or [])],
+                    "wants": [P.CARD.get(c, c) for c in (o.get("wantedResources") or [])],
+                    "my_response": responses.get(str(self.my_color_id)),
+                    "responses": {
+                        P.map_color(int(k)): v for k, v in responses.items() if str(k).isdigit()
+                    },
                 }
             )
         return out

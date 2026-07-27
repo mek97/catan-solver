@@ -254,6 +254,28 @@ main { display: flex; height: 100vh; }
 .pnum.hot b { color: var(--bad); }
 
 /* trades on the table */
+.offer-card {
+  border-left: 3px solid var(--line); padding: 7px 0 7px 10px; margin-bottom: 8px;
+  background: rgba(255,255,255,.03); border-radius: 0 6px 6px 0;
+}
+.offer-card.accept { border-color: var(--good); }
+.offer-card.reject { border-color: var(--bad); }
+.offer-card.counter { border-color: var(--warn); }
+.offer-card.cannot { border-color: var(--line); opacity: .7; }
+.ohead { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.ohead .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.ohead .owho { flex: 1; }
+.ohead b { color: var(--text); }
+.verdict {
+  font: 700 9.5px sans-serif; text-transform: uppercase; letter-spacing: .8px;
+  padding: 2px 7px; border-radius: 999px;
+}
+.verdict.accept { background: rgba(88,201,138,.2); color: var(--good); }
+.verdict.reject { background: rgba(226,104,95,.2); color: var(--bad); }
+.verdict.counter { background: rgba(232,163,61,.2); color: var(--warn); }
+.verdict.cannot { background: rgba(255,255,255,.08); color: var(--dim); }
+.owhy { color: var(--dim); font-size: 12px; margin-top: 3px; }
+
 .offer { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; padding: 4px 0; color: var(--dim); }
 .offer .dot { width: 9px; height: 9px; border-radius: 3px; flex: none; margin-top: 4px; }
 .offer.live { color: var(--text); }
