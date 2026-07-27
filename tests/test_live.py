@@ -156,14 +156,15 @@ def test_action_state_constants_match_observed_traffic():
     assert P.ACTION_DISCARD == 28
 
 
-def test_robber_options_always_available():
+def test_robber_options_are_ranked_and_legal():
     from app.live.advisor import robber_options
 
     eng = replay()
     cfg = eng.board_config()
+    cfg.pending = "move_robber"
     opts = robber_options(eng, cfg)
-    assert opts, "robber placements should rank even when not forced"
-    # never suggest the hex the robber already sits on
+    assert opts, "a forced robber move must offer placements"
+    # the robber has to move: never suggest the hex it already occupies
     assert all(o["hex"] != cfg.robber_hex for o in opts)
     assert opts == sorted(opts, key=lambda o: -o["score"])
 
@@ -289,3 +290,31 @@ def test_lobby_message_reusing_type_4_is_not_a_snapshot():
     assert eng.apply_snapshot([{"id": 1}]) is False
     assert eng.apply_snapshot({"payload": "nope"}) is False
     assert eng.state == {}
+
+
+def test_robber_is_only_offered_when_you_could_move_it():
+    """A 7 or a knight — with neither, ranking robber spots is noise."""
+    from app.live.advisor import robber_options
+
+    eng = replay()
+    cfg = eng.board_config()
+
+    # no dev cards and no 7: nothing to offer
+    eng.state["mechanicDevelopmentCardsState"] = {
+        "players": {str(eng.my_color_id): {"developmentCards": {"cards": []}}}
+    }
+    cfg.pending = None
+    assert robber_options(eng, cfg) == []
+
+    # forced by a 7
+    cfg.pending = "move_robber"
+    forced = robber_options(eng, cfg)
+    assert forced and all(o["forced"] for o in forced)
+
+    # holding a (masked) dev card that might be a knight
+    cfg.pending = None
+    eng.state["mechanicDevelopmentCardsState"] = {
+        "players": {str(eng.my_color_id): {"developmentCards": {"cards": [P.DEV_HIDDEN]}}}
+    }
+    maybe = robber_options(eng, cfg)
+    assert maybe and all(o["needs_knight"] for o in maybe)

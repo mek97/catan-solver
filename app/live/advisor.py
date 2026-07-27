@@ -428,10 +428,19 @@ def discard_advice(eng: GameEngine, cfg: BoardConfig) -> Optional[dict[str, Any]
 
 
 def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[dict[str, Any]]:
-    """Best robber placements, ranked — available whether or not it's forced.
+    """Best robber placements, ranked — but only when you could actually move it.
 
-    Useful ahead of time too: it tells you what a knight in hand is worth.
+    There are exactly two ways to move the robber: a 7 puts you in the robber
+    phase, or you play a knight. With neither available the ranking is noise,
+    so we return nothing rather than advertise a move you cannot make.
     """
+    forced = cfg.pending == "move_robber"
+    dev = eng.my_dev_cards() if eng is not None else {"count": 0, "known": {}, "hidden": 0}
+    # a masked dev card might be a knight; a known hand tells us outright
+    could_knight = dev["known"].get("knight", 0) > 0 or dev["hidden"] > 0
+    if not forced and not could_knight:
+        return []
+
     ctx = solver.build_ctx(cfg)
     out = []
     for m in solver._robber_moves(ctx)[:limit]:
@@ -443,6 +452,8 @@ def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[di
                 "score": round(m.score, 1),
                 "text": m.location_hint,
                 "why": m.reasoning,
+                "forced": forced,
+                "needs_knight": not forced,
             }
         )
     return out

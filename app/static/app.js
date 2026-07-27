@@ -320,6 +320,7 @@ function categorise(rec) {
   for (const r of rec.robber || []) {
     out.robber.push({
       score: r.score, text: r.text, why: r.why,
+      tag: r.needs_knight ? "if" : null,
       move: { steps: [{ type: "move_robber", robber_hex: r.hex, steal_from: r.steal_from }] },
     });
   }
