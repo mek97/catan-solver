@@ -9,17 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import board
+from . import board, rules
 from .models import RESOURCES, BoardConfig, MoveStep, ScoredMove
 
-PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
-
-COSTS = {
-    "road": {"wood": 1, "brick": 1},
-    "settlement": {"wood": 1, "brick": 1, "sheep": 1, "wheat": 1},
-    "city": {"wheat": 2, "ore": 3},
-    "dev": {"sheep": 1, "wheat": 1, "ore": 1},
-}
+# production odds exclude 7 -- it pays nobody, it moves the robber
+PIPS = {k: v for k, v in rules.PIPS.items() if k != 7}
+COSTS = rules.COSTS
 
 W = {
     "prod": 1.0,
@@ -40,6 +35,23 @@ def _hex_pips(tile) -> int:
     if tile.resource == "desert" or tile.number is None:
         return 0
     return PIPS.get(tile.number, 0)
+
+
+def _pieces_left(player, kind: str) -> int:
+    """Pieces still in a player's supply.
+
+    Upgrading a settlement to a city returns the settlement, so the count on
+    the board is the right thing to subtract. The live feed reports this
+    directly; the derivation is the fallback for hand-entered boards.
+    """
+    if player.pieces_left and kind in player.pieces_left:
+        return player.pieces_left[kind]
+    standing = {
+        "settlement": len(player.settlements),
+        "city": len(player.cities),
+        "road": len(player.roads),
+    }[kind]
+    return rules.PIECE_SUPPLY[kind] - standing
 
 
 def _afford(hand: dict[str, int], cost: dict[str, int]) -> bool:
@@ -83,8 +95,10 @@ def _player_pips(cfg: BoardConfig, color: str) -> dict[str, float]:
                 tile = cfg.hexes[h]
                 if tile.resource == "desert" or tile.number is None:
                     continue
-                factor = 0.5 if h == cfg.robber_hex else 1.0
-                pips[tile.resource] += weight * PIPS[tile.number] * factor
+                # the robber blocks the hex outright -- it produces nothing
+                if h == cfg.robber_hex:
+                    continue
+                pips[tile.resource] += weight * PIPS[tile.number]
     return pips
 
 
@@ -169,10 +183,17 @@ def build_ctx(cfg: BoardConfig) -> Ctx:
             + (2 if p.largest_army else 0)
         )
         ctx.opp_vp[color] = max(vp, p.vp_visible)
-        enemy = ctx.occupied - set(p.settlements) - set(p.cities)
-        ctx.opp_road_len[color] = _longest_road_length(set(p.roads), enemy)
+        if p.longest_road_len is not None:
+            ctx.opp_road_len[color] = p.longest_road_len
+        else:
+            enemy = ctx.occupied - set(p.settlements) - set(p.cities)
+            ctx.opp_road_len[color] = _longest_road_length(set(p.roads), enemy)
         ctx.max_opp_knights = max(ctx.max_opp_knights, p.knights_played)
-    ctx.my_road_len = _longest_road_length(ctx.my_roads, ctx.opp_buildings)
+    my_reported = cfg.players[me].longest_road_len
+    ctx.my_road_len = (
+        my_reported if my_reported is not None
+        else _longest_road_length(ctx.my_roads, ctx.opp_buildings)
+    )
     return ctx
 
 
@@ -380,8 +401,8 @@ def _road_move(ctx: Ctx, eid: int, roads: set[int] | None = None) -> ScoredMove:
     i_hold = ctx.cfg.players[ctx.cfg.me.color].longest_road
     lr_term = 0.0
     lr_note = ""
-    if not i_hold and new_len >= 5 and new_len > best_opp:
-        lr_term = 2.0 * ctx.vp_mult
+    if not i_hold and new_len >= rules.LONGEST_ROAD_MIN and new_len > best_opp:
+        lr_term = rules.LONGEST_ROAD_VP * ctx.vp_mult
         lr_note = f"takes Longest Road ({new_len} > {best_opp})"
     elif new_len > cur_len:
         lr_term = 0.3
@@ -457,14 +478,14 @@ def _best_builds(ctx: Ctx, hand: dict[str, int]) -> list[ScoredMove]:
     out = []
     cfg = ctx.cfg
     my_p = cfg.players[cfg.me.color]
-    if _afford(hand, COSTS["settlement"]) and len(my_p.settlements) < 5:
+    if _afford(hand, COSTS["settlement"]) and _pieces_left(my_p, "settlement") > 0:
         for vid in range(54):
             if board.is_vertex_placeable(vid, ctx.occupied) and vid in ctx.my_road_endpoints:
                 out.append(_settlement_move(ctx, vid))
-    if _afford(hand, COSTS["city"]) and len(my_p.cities) < 4:
+    if _afford(hand, COSTS["city"]) and _pieces_left(my_p, "city") > 0:
         for vid in my_p.settlements:
             out.append(_city_move(ctx, vid))
-    if _afford(hand, COSTS["road"]) and len(my_p.roads) < 15:
+    if _afford(hand, COSTS["road"]) and _pieces_left(my_p, "road") > 0:
         for eid in _legal_road_edges(ctx):
             out.append(_road_move(ctx, eid))
     if _afford(hand, COSTS["dev"]):
@@ -472,14 +493,22 @@ def _best_builds(ctx: Ctx, hand: dict[str, int]) -> list[ScoredMove]:
             cfg.players[cfg.me.color].knights_played >= ctx.max_opp_knights
             and not cfg.players[cfg.me.color].largest_army
         )
-        score = 1.2 + (0.4 if ctx.my_vp >= 7 else 0.0) + (1.0 if army_race else 0.0)
+        odds = rules.dev_card_odds()
+        # a 25-card deck is 14 knights and 5 victory points, so a card is
+        # mostly an army play and sometimes a hidden point -- which is worth
+        # far more when a hidden point actually wins the game
+        vp_now = odds["victory_point"] * (4.0 if ctx.my_vp >= rules.VICTORY_POINTS_TO_WIN - 1 else 1.0)
+        score = 1.2 + 2.0 * vp_now + (1.0 if army_race else 0.0)
         out.append(
             ScoredMove(
                 steps=[MoveStep(type="buy_dev")],
                 score=score,
-                reasoning="Buy a development card: chance at a knight, VP, or utility card"
-                + (" -- and you are in the Largest Army race" if army_race else "")
-                + ".",
+                reasoning=(
+                    f"Buy a development card: {odds['knight']:.0%} knight, "
+                    f"{odds['victory_point']:.0%} a hidden victory point"
+                    + (" -- and you are in the Largest Army race" if army_race else "")
+                    + "."
+                ),
                 location_hint="buy a development card",
             )
         )
@@ -508,11 +537,11 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
             best = robber[0]
             kp = cfg.players[cfg.me.color].knights_played
             takes_army = (
-                kp + 1 >= 3
+                kp + 1 >= rules.LARGEST_ARMY_MIN
                 and kp + 1 > ctx.max_opp_knights
                 and not cfg.players[cfg.me.color].largest_army
             )
-            army_term = 2.0 * ctx.vp_mult if takes_army else 0.5
+            army_term = rules.LARGEST_ARMY_VP * ctx.vp_mult if takes_army else 0.5
             best = best.model_copy(deep=True)
             best.score += army_term
             best.reasoning = "Play a knight: " + best.reasoning[len("Robber: "):]
@@ -520,7 +549,7 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                 best.reasoning += " Playing it also takes Largest Army (2 VP)."
             best.location_hint = "play your knight, then " + best.location_hint
             out.append(best)
-    if dc.road_building >= 1 and len(cfg.players[cfg.me.color].roads) <= 13:
+    if dc.road_building >= 1 and _pieces_left(cfg.players[cfg.me.color], "road") >= 2:
         legal1 = _legal_road_edges(ctx)
         if legal1:
             first = max(legal1, key=lambda e: _road_move(ctx, e).score)
@@ -552,7 +581,11 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                 if lack > 0:
                     missing[r] = lack
                     short += lack
-            if 0 < short <= 2:
+            if 0 < short <= 2 and all(
+                ctx.cfg.bank is None
+                or ctx.cfg.bank.get(r, rules.BANK_PER_RESOURCE) >= n
+                for r, n in missing.items()
+            ):
                 builds = _best_builds(ctx, _pay({**ctx.hand, **{
                     r: ctx.hand.get(r, 0) + missing.get(r, 0) for r in RESOURCES
                 }}, {}))
@@ -624,12 +657,19 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
 def _trade_combos(ctx: Ctx) -> list[ScoredMove]:
     out: list[ScoredMove] = []
 
+    bank = ctx.cfg.bank
+
+    def in_stock(res: str, n: int = 1) -> bool:
+        # an empty bank cannot pay out; colonist reports the stock, and when
+        # it doesn't we assume the resource is available
+        return bank is None or bank.get(res, rules.BANK_PER_RESOURCE) >= n
+
     def single_trades(hand: dict[str, int]):
         for give in RESOURCES:
             rate = ctx.rates[give]
             if hand.get(give, 0) >= rate:
                 for get in RESOURCES:
-                    if get != give:
+                    if get != give and in_stock(get):
                         yield give, get, rate
 
     def apply(hand, give, get, rate):
@@ -688,9 +728,11 @@ def _trade_combos(ctx: Ctx) -> list[ScoredMove]:
         trades = list(single_trades(ctx.hand))
         if trades:
             give, _, rate = max(trades, key=lambda t: ctx.hand.get(t[0], 0))
-            get = min(RESOURCES, key=lambda r: ctx.my_pips.get(r, 0))
-            if get == give:
-                get = sorted(RESOURCES, key=lambda r: ctx.my_pips.get(r, 0))[1]
+            # take whatever we make least of that the bank can actually pay out
+            wanted = [r for r in RESOURCES if r != give and in_stock(r)]
+            if not wanted:
+                return out
+            get = min(wanted, key=lambda r: ctx.my_pips.get(r, 0))
             out.append(
                 ScoredMove(
                     steps=[trade_step(give, get, rate)],

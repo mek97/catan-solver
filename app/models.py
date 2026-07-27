@@ -6,20 +6,18 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from . import board
+from . import board, rules
 
-RESOURCES = ["wood", "brick", "sheep", "wheat", "ore"]
+RESOURCES = rules.RESOURCES
 
 Resource = Literal["wood", "brick", "sheep", "wheat", "ore"]
 HexResource = Literal["wood", "brick", "sheep", "wheat", "ore", "desert"]
 Color = Literal["red", "blue", "orange", "green"]
 PortType = Literal["3:1", "wood", "brick", "sheep", "wheat", "ore"]
 
-# standard base-game distributions, used for soft warnings only
-STANDARD_TOKENS = Counter({2: 1, 3: 2, 4: 2, 5: 2, 6: 2, 8: 2, 9: 2, 10: 2, 11: 2, 12: 1})
-STANDARD_RESOURCES = Counter(
-    {"wood": 4, "sheep": 4, "wheat": 4, "brick": 3, "ore": 3, "desert": 1}
-)
+# base-game distributions, used for soft warnings only
+STANDARD_TOKENS = Counter(rules.TOKEN_DISTRIBUTION)
+STANDARD_RESOURCES = Counter(rules.TILE_DISTRIBUTION)
 
 
 class HexTile(BaseModel):
@@ -47,6 +45,9 @@ class PlayerState(BaseModel):
     settlements: list[int] = Field(default_factory=list)
     cities: list[int] = Field(default_factory=list)
     roads: list[int] = Field(default_factory=list)
+    # authoritative values when the live feed supplies them; None => derive
+    pieces_left: Optional[dict[str, int]] = None
+    longest_road_len: Optional[int] = None
     vp_visible: int = 0
     resource_count: int = 0
     dev_card_count: int = 0
@@ -70,6 +71,7 @@ class MyState(BaseModel):
     # win over anything we'd derive from port geometry, which can't know about
     # rule variants and is only as good as our port parsing
     bank_rates: Optional[dict[Resource, int]] = None
+    discard_limit: int = 7
     dev_cards: DevCards = Field(default_factory=DevCards)
     dev_card_bought_this_turn: bool = False
     dev_card_played_this_turn: bool = False
@@ -81,6 +83,7 @@ class BoardConfig(BaseModel):
     robber_hex: int = 0
     players: dict[Color, PlayerState] = Field(default_factory=dict)
     me: MyState
+    bank: Optional[dict[Resource, int]] = None  # cards left in the bank
     phase: Literal["setup1", "setup2", "main"] = "main"
     turn: Optional[Color] = None
     pending: Optional[Literal["move_robber"]] = None
@@ -100,7 +103,10 @@ class BoardConfig(BaseModel):
         seen_v: dict[int, str] = {}
         seen_e: dict[int, str] = {}
         for color, p in self.players.items():
-            if len(p.settlements) > 5 or len(p.cities) > 4 or len(p.roads) > 15:
+            limits = rules.PIECE_SUPPLY
+            if (len(p.settlements) > limits["settlement"]
+                    or len(p.cities) > limits["city"]
+                    or len(p.roads) > limits["road"]):
                 raise ValueError(f"{color} exceeds piece limits")
             for v in p.settlements + p.cities:
                 if not 0 <= v < 54:

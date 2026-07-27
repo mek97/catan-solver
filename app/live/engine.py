@@ -136,6 +136,41 @@ class GameEngine:
             out.append(Port(type=ptype, vertices=[a, b]))  # type: ignore[arg-type]
         return out
 
+    def pieces_left(self, color: str) -> dict[str, int]:
+        """Pieces still in a player's supply, as colonist reports them."""
+        keys = {
+            "settlement": ("mechanicSettlementState", "bankSettlementAmount"),
+            "city": ("mechanicCityState", "bankCityAmount"),
+            "road": ("mechanicRoadState", "bankRoadAmount"),
+        }
+        out: dict[str, int] = {}
+        for kind, (section, field) in keys.items():
+            for cid, v in (self.state.get(section) or {}).items():
+                if str(cid).isdigit() and P.map_color(int(cid)) == color:
+                    if isinstance(v, dict) and isinstance(v.get(field), int):
+                        out[kind] = v[field]
+        return out
+
+    def longest_roads(self) -> dict[str, int]:
+        """Each player's longest road, per colonist's own calculation."""
+        out: dict[str, int] = {}
+        for cid, v in (self.state.get("mechanicLongestRoadState") or {}).items():
+            if str(cid).isdigit() and isinstance(v, dict) and isinstance(v.get("longestRoad"), int):
+                color = P.map_color(int(cid))
+                if color:
+                    out[color] = v["longestRoad"]
+        return out
+
+    def bank_stock(self) -> dict[str, int]:
+        """Cards left in the bank; an empty pile cannot be traded for."""
+        cards = (self.state.get("bankState") or {}).get("resourceCards") or {}
+        return {P.CARD[int(k)]: v for k, v in cards.items() if int(k) in P.CARD}
+
+    def discard_limit(self) -> int:
+        ps = (self.state.get("playerStates") or {}).get(str(self.my_color_id)) or {}
+        limit = ps.get("cardDiscardLimit")
+        return limit if isinstance(limit, int) else 7
+
     def dev_cards_used(self) -> dict[str, int]:
         """Knights/dev cards each player has *played* — public information."""
         out: dict[str, int] = {}
@@ -345,6 +380,8 @@ class GameEngine:
             players[color].resource_count = len(
                 (ps.get("resourceCards") or {}).get("cards") or []
             )
+            players[color].pieces_left = self.pieces_left(color)
+            players[color].longest_road_len = self.longest_roads().get(color)
         longest = (self.state.get("mechanicLongestRoadState") or {})
         for cid, v in longest.items():
             color = P.map_color(int(cid)) if str(cid).isdigit() else None
@@ -376,12 +413,14 @@ class GameEngine:
                 color=self.my_color,  # type: ignore[arg-type]
                 hand=self.my_hand(),
                 bank_rates=self.bank_ratios() or None,
+                discard_limit=self.discard_limit(),
                 dev_cards=DevCards(**{
                     k: v for k, v in self.my_dev_cards()["known"].items()
                     if k in DevCards.model_fields
                 }),
                 dev_card_bought_this_turn=self.my_dev_cards()["bought_this_turn"],
             ),
+            bank=self.bank_stock() or None,
             phase=self.phase(),  # type: ignore[arg-type]
             turn=self.current_turn(),  # type: ignore[arg-type]
             pending=pending,  # type: ignore[arg-type]

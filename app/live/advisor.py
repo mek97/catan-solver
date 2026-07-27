@@ -13,9 +13,9 @@ from .. import board, solver
 from ..models import RESOURCES, BoardConfig, ScoredMove
 from .engine import GameEngine
 
-COSTS = solver.COSTS
-PIPS = solver.PIPS
-DISCARD_LIMIT = 7  # colonist's cardDiscardLimit default; a 7 halves anything above
+from .. import rules
+
+COSTS = rules.COSTS
 
 
 def _shortfall(hand: dict[str, int], cost: dict[str, int]) -> dict[str, int]:
@@ -382,9 +382,9 @@ def discard_advice(eng: GameEngine, cfg: BoardConfig) -> Optional[dict[str, Any]
     """On a 7, which cards to throw away: keep what completes the best build."""
     hand = cfg.me.hand
     total = sum(hand.values())
-    if total <= DISCARD_LIMIT:
+    to_drop = rules.discard_count(total, cfg.me.discard_limit)
+    if not to_drop:
         return None
-    to_drop = total // 2
     ctx = solver.build_ctx(cfg)
     # value each card: what it costs to replace (rarity for me) + build usefulness
     need: Counter[str] = Counter()
