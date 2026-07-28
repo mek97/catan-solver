@@ -262,12 +262,22 @@ class GameEngine:
         known = Counter(
             P.DEV_CARD[c] for c in cards if c in P.DEV_CARD
         )
+        # colonist names the cards bought this turn rather than just counting
+        # them, which is what makes the real rule expressible: a card cannot be
+        # played the turn it is bought, but the others in your hand still can.
+        fresh = Counter(
+            P.DEV_CARD[c] for c in (mine.get("developmentCardsBoughtThisTurn") or [])
+            if c in P.DEV_CARD
+        )
         return {
             "count": len(cards),
             "known": dict(known),
             "hidden": sum(1 for c in cards if c not in P.DEV_CARD),
             "used": len(mine.get("developmentCardsUsed") or []),
-            "bought_this_turn": bool(mine.get("developmentCardsBoughtThisTurn")),
+            "bought_this_turn": dict(fresh),
+            "playable": {k: n - fresh.get(k, 0) for k, n in known.items() if n - fresh.get(k, 0) > 0},
+            # one development card per turn, and colonist tracks it for us
+            "played_this_turn": bool(mine.get("hasUsedDevelopmentCardThisTurn")),
         }
 
     def dev_card_counts(self) -> dict[str, int]:
@@ -410,6 +420,7 @@ class GameEngine:
 
     def board_config(self) -> BoardConfig:
         ms = self.state.get("mapState") or {}
+        mine_dev = self.my_dev_cards()
         hexes = [HexTile(resource="desert", number=None) for _ in board.HEXES]
         for hid, h in (ms.get("tileHexStates") or {}).items():
             cid = self.maps["hexes"].get(str(hid))
@@ -512,11 +523,14 @@ class GameEngine:
                 hand=self.my_hand(),
                 bank_rates=self.bank_ratios() or None,
                 discard_limit=self.discard_limit(),
+                # only the cards that are legal to play right now reach the
+                # solver: one per turn, and never the one just bought
                 dev_cards=DevCards(**{
-                    k: v for k, v in self.my_dev_cards()["known"].items()
+                    k: v for k, v in mine_dev["playable"].items()
                     if k in DevCards.model_fields
                 }),
-                dev_card_bought_this_turn=self.my_dev_cards()["bought_this_turn"],
+                dev_card_bought_this_turn=bool(mine_dev["bought_this_turn"]),
+                dev_card_played_this_turn=mine_dev["played_this_turn"],
             ),
             bank=self.bank_stock() or None,
             phase=self.phase(),  # type: ignore[arg-type]

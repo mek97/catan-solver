@@ -204,3 +204,98 @@ def test_discard_is_only_required_during_the_discard_phase():
 
     cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 3, "wheat": 0, "ore": 0}  # 7 cards
     assert discard_advice(None, cfg) is None, "seven cards is safe"
+
+
+# --- sequencing: what you may do, and when ----------------------------------
+
+
+def _mid_game(**me_kw):
+    """A position with a settlement, a road, and cards to spend."""
+    cfg = BoardConfig.model_validate({
+        **__import__("json").loads(
+            (__import__("pathlib").Path(__file__).parent.parent
+             / "app" / "fixtures" / "default_board.json").read_text()),
+        "phase": "main",
+    })
+    v = max(range(54), key=lambda x: sum(
+        solver.PIPS.get(cfg.hexes[h].number, 0) for h in board.VERTEX_HEXES[x]
+        if cfg.hexes[h].number))
+    cfg.players["red"].settlements = [v]
+    cfg.players["red"].roads = [board.VERTEX_EDGES[v][0]]
+    cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 2, "wheat": 2, "ore": 2}
+    for k, val in me_kw.items():
+        setattr(cfg.me, k, val)
+    return cfg
+
+
+def test_one_development_card_per_turn():
+    played = _mid_game(dev_card_played_this_turn=True)
+    played.me.dev_cards.knight = 2
+    assert not any(m.steps[0].type.startswith("play_") for m in solver.solve(played))
+
+
+def test_buying_a_card_does_not_lock_the_ones_you_already_had():
+    """The card you just bought is unplayable. The rest of your hand is not.
+
+    Blocking everything cost a knight that was legal all along -- in a recorded
+    game we held a knight, bought a victory point, and the solver went quiet.
+    """
+    cfg = _mid_game(dev_card_bought_this_turn=True)
+    cfg.me.dev_cards.knight = 1
+    assert any(m.steps[0].type == "play_knight" for m in solver.solve(cfg))
+
+
+def test_the_engine_hides_the_card_bought_this_turn():
+    """The subtraction happens where the hand is read, not in the solver."""
+    from app.live.engine import GameEngine
+    from app.live import protocol as P
+
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.state = {"mechanicDevelopmentCardsState": {"players": {"1": {
+        "developmentCards": {"cards": [11, 12]},        # a knight and a point
+        "developmentCardsBoughtThisTurn": [12],         # the point is new
+    }}}}
+    dev = eng.my_dev_cards()
+    assert dev["known"] == {"knight": 1, "victory_point": 1}
+    assert dev["playable"] == {"knight": 1}, "the fresh card must not be playable"
+    assert dev["bought_this_turn"] == {"victory_point": 1}
+
+
+def test_colonist_reports_whether_a_card_was_already_played():
+    from app.live.engine import GameEngine
+
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.state = {"mechanicDevelopmentCardsState": {"players": {"1": {
+        "developmentCards": {"cards": [11]},
+        "hasUsedDevelopmentCardThisTurn": True,
+    }}}}
+    assert eng.my_dev_cards()["played_this_turn"] is True
+
+
+def test_setup_places_a_settlement_anywhere_legal_then_a_road_touching_it():
+    """Opening placement ignores road connectivity -- that is the whole point
+    of it -- but the free road must still touch the settlement just placed."""
+    cfg = _mid_game()
+    cfg.players["red"].settlements = []
+    cfg.players["red"].roads = []
+    cfg.phase = "setup1"
+    for m in solver.solve(cfg)[:5]:
+        assert m.steps[0].type == "setup_settlement"
+        assert m.steps[1].type == "setup_road"
+        v, e = m.steps[0].vertex, m.steps[1].edge
+        assert v in board.EDGE_VERTICES[e], "the free road must touch the settlement"
+
+
+def test_only_the_first_two_settlements_are_free():
+    """Once two are down the setup phase is over, whatever the caller says."""
+    from app.live.engine import GameEngine
+
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.play_order = [1, 2, 3, 4]
+    eng.state = {"mapState": {"tileCornerStates": {
+        "0": {"owner": 1}, "1": {"owner": 1},
+    }}}
+    assert eng.phase() == "main"

@@ -564,15 +564,19 @@ def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[di
     if not forced and not could_knight:
         return []
 
+    # priced the same way solve() prices a knight -- in turns taken off the
+    # players it blocks. Reading the raw generation score here put pips and
+    # turns side by side in one panel, which makes them look comparable.
     ctx = solver.build_ctx(cfg)
+    ranked = solver._score_robber(ctx, solver._robber_moves(ctx))
     out = []
-    for m in solver._robber_moves(ctx)[:limit]:
+    for m in ranked[:limit]:
         step = m.steps[0]
         out.append(
             {
                 "hex": step.robber_hex,
                 "steal_from": step.steal_from,
-                "score": round(m.score, 1),
+                "score": round(m.score, 2),
                 "text": m.location_hint,
                 "why": m.reasoning,
                 "forced": forced,

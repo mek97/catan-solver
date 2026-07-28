@@ -78,14 +78,40 @@ MSG_GAME_DIFF = 91         # partial state diff (the move stream)
 MSG_ROOM_STATE = "stateUpdated"
 
 # currentState.actionState — what the active player is being asked to do.
-# Established by correlating the value with the log events that follow it:
-# 24 always precedes a robber_moved, 28 precedes cards_discarded on a 7.
+#
+# Every value here was established by replaying each recorded game and counting
+# which log events followed the state while it was in force. Doing that across
+# games instead of within one leaks state over the boundary and produces a
+# confident, wrong answer, which is worth saying out loud because it did:
+#
+#   0  -> cards_received x573, turn_ended x312, dice_rolled x311   (nobody is asked)
+#   1  -> piece_placed x64                                          (build phase)
+#   3  -> piece_placed x76, turn_ended x76                          (setup placement)
+#   4  -> piece_bought x62                                          (buying a card)
+#   6  -> piece_bought x24                                          }  build modes
+#   7  -> piece_bought x23                                          }
+#   24 -> robber_moved x64, card_stolen x9                          (move the robber)
+#   27 -> card_stolen x3, log_16 x25                                (pick a victim)
+#   28 -> cards_discarded x23                                       (discard on a 7)
+#   30 -> piece_placed x3                                           }  road building's
+#   31 -> piece_placed x3                                           }  two free roads
+#   32 -> year_of_plenty_taken x3                                   (choose 2 cards)
+#   33 -> monopoly_stole x2                                         (choose a resource)
+#
+# Not established: which state means "roll the dice". Only 8 of our own turns
+# were captured, which is not enough to tell a pre-roll prompt from the idle
+# state, so the solver does not try to enforce rolling before building.
 ACTION_IDLE = 0
 ACTION_TURN = 1
 ACTION_SETUP_PLACE = 3
 ACTION_BUY_DEV = 4
+ACTION_BUILD = (6, 7)
 ACTION_MOVE_ROBBER = 24
+ACTION_STEAL = 27
 ACTION_DISCARD = 28
+ACTION_ROAD_BUILDING = (30, 31)
+ACTION_YEAR_OF_PLENTY = 32
+ACTION_MONOPOLY = 33
 
 # gameLogState text types -> semantic event kind
 LOG = {

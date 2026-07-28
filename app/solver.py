@@ -25,6 +25,11 @@ from .models import RESOURCES, BoardConfig, MoveStep, MyState, ScoredMove
 PIPS = {k: v for k, v in rules.PIPS.items() if k != 7}
 COSTS = rules.COSTS
 
+# Generation weights, in weighted pips. These no longer rank anything -- solve()
+# replaces every score with turns off the race to ten points -- but they are not
+# decoration either: they order candidates inside a family, and _trade_combos
+# picks which trade to enumerate by them. Scaling them all changes nothing;
+# changing them relative to each other changes what gets considered.
 W = {
     "prod": 1.0,
     "port": 0.7,
@@ -547,8 +552,10 @@ def _cost_of(step: MoveStep) -> dict[str, int]:
 def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
     cfg = ctx.cfg
     dc = cfg.me.dev_cards
-    if cfg.me.dev_card_played_this_turn or cfg.me.dev_card_bought_this_turn:
-        # v1 simplification: a freshly bought card locks all plays this turn.
+    if cfg.me.dev_card_played_this_turn:
+        # One development card per turn, which colonist reports directly.
+        # Buying does NOT lock the rest of the hand: only the card just bought
+        # is unplayable, and the engine has already subtracted it.
         return []
     out: list[ScoredMove] = []
     if dc.knight >= 1:
@@ -1057,23 +1064,31 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     if cfg.phase in ("setup1", "setup2"):
         return _setup_moves(ctx)
 
-    moves: list[ScoredMove] = []
-    atomic = _best_builds(ctx, ctx.hand)
-    moves.extend(atomic)
-    moves.extend(_dev_plays(ctx))
-    moves.extend(_trade_combos(ctx))
-    moves.extend(_build_chains(ctx, atomic))
-
-    # Everything above was generated with a heuristic score; that score chose
-    # *which* moves are worth considering, but it is not what ranks them.
+    # Two stages, and the order between them matters. Generation scores in
+    # weighted pips: good enough to decide what is worth considering, and to
+    # break ties inside a family of candidates, but not comparable to a victory
+    # point. Pricing then replaces every score with turns off the race.
+    #
+    # Chains are built from the *priced* atomic moves rather than the raw ones,
+    # so the pair worth making is chosen by the measure that ranks it. Picking
+    # them by pips first let the old objective veto, before the real one ever
+    # saw them, exactly the moves the turns model exists to find.
     base = economy.turns_to_win(cfg, ctx)
-    rescored = []
-    for m in moves:
-        if m.steps[0].type in ("play_knight", "move_robber"):
-            continue  # priced against the opponents below, not against us
-        rescored.append(m.model_copy(update={"score": round(_turns_saved(cfg, base, m), 2)}))
-    knights = _score_robber(ctx, [m for m in moves if m.steps[0].type == "play_knight"])
-    moves = rescored + knights
+
+    def priced(candidates: list[ScoredMove]) -> list[ScoredMove]:
+        return [
+            m.model_copy(update={"score": round(_turns_saved(cfg, base, m), 2)})
+            for m in candidates
+        ]
+
+    dev = _dev_plays(ctx)
+    atomic = priced(_best_builds(ctx, ctx.hand))
+    moves: list[ScoredMove] = list(atomic)
+    moves += priced([m for m in dev if m.steps[0].type != "play_knight"])
+    moves += priced(_trade_combos(ctx))
+    moves += priced(_build_chains(ctx, atomic))
+    # the robber is the one thing not measured against our own clock
+    moves += _score_robber(ctx, [m for m in dev if m.steps[0].type == "play_knight"])
 
     moves.append(
         ScoredMove(
