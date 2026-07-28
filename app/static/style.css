@@ -338,6 +338,14 @@ main { display: flex; height: 100vh; }
 .plan-vp { color: #8fc63f; }
 .plan-where { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* every player's clock, so our own plan is read against the field */
+.plan-race { display: flex; gap: 8px; margin: 0 0 7px; padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(255,255,255,.08); }
+.clock { display: inline-flex; align-items: center; gap: 3px; font: 600 11px var(--mono);
+  color: var(--faint); }
+.clock.me { color: var(--dim); }
+.clock i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+
 /* what a player has actually done at the trade table */
 .ptrade { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 5px;
   padding-top: 5px; border-top: 1px dashed rgba(255,255,255,.08); }

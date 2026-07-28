@@ -388,6 +388,16 @@ function renderUrgent(rec) {
     const best = rec.robber?.[0];
     add("move the robber", best ? best.text : "choose a hex");
   }
+  // The race, before anything about our own plan. Being told to build a city
+  // while somebody else is one move from ten points is how advice ends up
+  // looking like a loss.
+  const race = rec?.race;
+  if (race?.leader && race.leader_turns <= 4) {
+    add(`${race.leader} wins in ~${race.leader_turns.toFixed(0)}`,
+        race.behind > 2
+          ? `you are ${race.behind.toFixed(0)} turns behind — block or deny, building will not catch up`
+          : "close enough to race — keep building");
+  }
   if (rec?.pending === "roll") {
     // a knight is the only thing that can happen first, and only sometimes
     // is it worth it -- say which, rather than just "roll"
@@ -649,9 +659,18 @@ function renderPlan(rec) {
   }
   el.classList.remove("hidden");
   const need = 10 - plan.vp;
+  const race = rec?.race;
+  const clocks = race
+    ? `<div class="plan-race">` +
+      Object.entries(race.turns)
+        .sort((a, b) => a[1] - b[1])
+        .map(([c, t]) => `<span class="clock${c === rec.players?.find(p=>p.is_me)?.color ? " me" : ""}">` +
+             `<i style="background:var(--${c})"></i>${t >= 80 ? "—" : t.toFixed(0)}</span>`)
+        .join("") + `</div>`
+    : "";
   el.innerHTML =
     `<div class="plan-head"><span>${plan.vp} VP · ${need} to go</span>` +
-    `<span class="plan-eta">~${plan.turns} turns</span></div>` +
+    `<span class="plan-eta">~${plan.turns} turns</span></div>` + clocks +
     plan.steps
       .map(
         (s) => `<div class="plan-step">

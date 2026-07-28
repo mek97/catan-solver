@@ -311,3 +311,39 @@ def test_a_tie_is_still_worth_planning_for():
     v = next(iter(pos.spots))
     pos.rivals = {**pos.rivals, v: len(paths[v])}
     assert v in economy._reachable(pos)
+
+
+# --- the race ---------------------------------------------------------------
+
+
+def test_the_race_measures_everyone_not_just_us():
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    r = solver.race(cfg)
+    assert set(r["turns"]) == set(cfg.players), "every seat has a clock"
+    assert r["leader"] != cfg.me.color, "the leader is somebody else"
+    assert r["behind"] == pytest.approx(r["mine"] - r["leader_turns"])
+
+
+def test_being_behind_makes_denial_worth_more():
+    """Level with the field our own progress wins; far behind it cannot."""
+    assert solver._denial_weight(0) < solver._denial_weight(5)
+    assert solver._denial_weight(5) < solver._denial_weight(20)
+    # but slowing the leader never outweighs winning outright
+    assert solver._denial_weight(100) <= 1.0
+
+
+def test_a_move_that_costs_the_leader_more_than_it_costs_us_is_worth_making():
+    """Scoring only our own clock made every such move look like a loss."""
+    cfg = load(phase="main")
+    spots = _spread(cfg, 4)
+    _settle(cfg, "red", spots[0])
+    _settle(cfg, "blue", spots[1])
+    cfg.players["blue"].vp_visible = 8
+    cfg.me.hand = {"wood": 1, "brick": 1, "sheep": 1, "wheat": 1}
+
+    contested = solver.race(cfg)
+    assert contested["leader"] == "blue"
+    # the weight is what carries a denial into positive territory at all
+    assert solver._denial_weight(contested["behind"]) > 0

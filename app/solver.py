@@ -17,7 +17,7 @@ it blocks -- see `_score_robber`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from . import board, economy, rules
 from .models import RESOURCES, BoardConfig, MoveStep, MyState, ScoredMove
@@ -1125,6 +1125,46 @@ def _opponent_turns(cfg: BoardConfig, color: str) -> float:
     return economy.turns_to_win(view, build_ctx(view))
 
 
+def race(cfg: BoardConfig) -> dict[str, Any]:
+    """Everyone's clock, not just ours.
+
+    turns_to_win answers "how fast can I reach ten points", which is only the
+    right question if nobody else is trying. Judged that way a player nine
+    turns behind still gets told to build their fourth city, because the
+    measure cannot see that the game ends first.
+    """
+    out: dict[str, float] = {}
+    for color in cfg.players:
+        view = cfg.model_copy(deep=True)
+        view.me = MyState(
+            color=color,  # type: ignore[arg-type]
+            hand=dict(cfg.me.hand) if color == cfg.me.color else {},
+            bank_rates=cfg.me.bank_rates if color == cfg.me.color else None,
+        )
+        out[color] = economy.turns_to_win(view, build_ctx(view))
+    mine = out.get(cfg.me.color, economy.LOST)
+    rivals = {c: t for c, t in out.items() if c != cfg.me.color}
+    leader = min(rivals, key=lambda c: rivals[c], default=None)
+    return {
+        "turns": out,
+        "mine": mine,
+        "leader": leader,
+        "leader_turns": rivals.get(leader, economy.LOST) if leader else economy.LOST,
+        "behind": mine - rivals[leader] if leader else 0.0,
+    }
+
+
+def _denial_weight(behind: float) -> float:
+    """How much a turn taken off the leader is worth against one we save.
+
+    Level with the field, our own progress is what wins; far enough behind, it
+    is the only thing that can. Slowing the leader does not win the game, so
+    this never exceeds parity -- it decides which of two moves to prefer, not
+    whether to stop playing.
+    """
+    return _clamp(0.25 + 0.12 * behind, 0.25, 1.0)
+
+
 def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
     """Re-price robber placements as turns taken off opponents, not pips.
 
@@ -1189,12 +1229,21 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     # them by pips first let the old objective veto, before the real one ever
     # saw them, exactly the moves the turns model exists to find.
     base = economy.turns_to_win(cfg, ctx)
+    contest = race(cfg)
+    weight, leader = _denial_weight(contest["behind"]), contest["leader"]
 
     def priced(candidates: list[ScoredMove]) -> list[ScoredMove]:
-        return [
-            m.model_copy(update={"score": round(_turns_saved(cfg, base, m), 2)})
-            for m in candidates
-        ]
+        out = []
+        for m in candidates:
+            nxt = _after(cfg, m.steps)
+            gain = base - economy.turns_to_win(nxt, build_ctx(nxt))
+            # Taking a corner can cost the leader more than it saves us, and
+            # measuring only our own clock made those moves look like losses.
+            # Only placements are checked: nothing else we build reaches them.
+            if leader and any(s.vertex is not None for s in m.steps):
+                gain += weight * (_opponent_turns(nxt, leader) - contest["leader_turns"])
+            out.append(m.model_copy(update={"score": round(gain, 2)}))
+        return out
 
     dev = _dev_plays(ctx)
     atomic = priced(_best_builds(ctx, ctx.hand))

@@ -633,6 +633,7 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "proposals": trade_proposals(eng, cfg),
         "trade_history": trade_history(eng),
         "plan": victory_plan(eng, cfg),
+        "race": solver.race(cfg),
         "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),
