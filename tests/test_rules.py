@@ -299,3 +299,48 @@ def test_only_the_first_two_settlements_are_free():
         "0": {"owner": 1}, "1": {"owner": 1},
     }}}
     assert eng.phase() == "main"
+
+
+def test_a_point_card_counts_the_turn_it_is_bought():
+    """It is revealed, not played, so the buy-turn restriction does not apply:
+    the rules let you win on a card bought that same turn."""
+    from app.live.engine import GameEngine
+
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.state = {"mechanicDevelopmentCardsState": {"players": {"1": {
+        "developmentCards": {"cards": [12, 11]},        # a point and a knight
+        "developmentCardsBoughtThisTurn": [12, 11],     # both bought just now
+    }}}}
+    dev = eng.my_dev_cards()
+    assert dev["known"]["victory_point"] == 1
+    assert dev["playable"] == {}, "the knight cannot be played this turn"
+
+
+def test_hidden_points_are_not_dropped_by_a_field_name():
+    """colonist says victory_point, the model's field is vp. Filtering on field
+    names silently discarded every hidden point."""
+    from app.models import DevCards
+
+    assert "victory_point" not in DevCards.model_fields
+    assert "vp" in DevCards.model_fields
+
+
+def test_you_win_with_ten_or_more_not_exactly_ten():
+    """Taking Longest Road at nine points puts you on eleven, and you win."""
+    from app import economy
+
+    cfg = _mid_game()
+    me = cfg.players["red"]
+    me.settlements = []
+    me.roads = []
+    out = []
+    for v in range(54):
+        if len(out) == 5:
+            break
+        if all(v not in board.VERTEX_ADJ[o] for o in out):
+            out.append(v)
+    me.cities, me.settlements = out[:4], out[4:]   # 8 + 1 = 9 VP
+    me.longest_road = True                          # +2 -> 11, not exactly 10
+    assert solver.build_ctx(cfg).my_vp == 11
+    assert economy.turns_to_win(cfg, solver.build_ctx(cfg)) == 0.0, "11 points wins"

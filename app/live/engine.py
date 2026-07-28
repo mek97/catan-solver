@@ -565,12 +565,22 @@ class GameEngine:
                 hand=self.my_hand(),
                 bank_rates=self.bank_ratios() or None,
                 discard_limit=self.discard_limit(),
-                # only the cards that are legal to play right now reach the
-                # solver: one per turn, and never the one just bought
-                dev_cards=DevCards(**{
-                    k: v for k, v in mine_dev["playable"].items()
-                    if k in DevCards.model_fields
-                }),
+                # Only the cards legal to play right now reach the solver: one
+                # per turn, and never the one just bought.
+                #
+                # A point card is the exception, twice over. It is revealed
+                # rather than played, so the turn it was bought does not
+                # restrict it -- the rules let you win on a card bought that
+                # same turn. And colonist names it victory_point while the
+                # model calls the field vp, so filtering on field names dropped
+                # every hidden point on the floor.
+                dev_cards=DevCards(
+                    vp=mine_dev["known"].get("victory_point", 0),
+                    **{
+                        k: v for k, v in mine_dev["playable"].items()
+                        if k in DevCards.model_fields
+                    },
+                ),
                 dev_card_bought_this_turn=bool(mine_dev["bought_this_turn"]),
                 dev_card_played_this_turn=mine_dev["played_this_turn"],
             ),
