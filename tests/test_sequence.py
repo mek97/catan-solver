@@ -140,3 +140,60 @@ def test_the_engine_reads_the_roll_from_colonist_not_from_a_guess():
     assert eng.dice_thrown() is True
     eng.state = {}
     assert eng.dice_thrown() is False
+
+
+# --- road building owes you two ---------------------------------------------
+
+
+def test_the_second_free_road_is_still_owed_after_the_first():
+    """Reported live: placing one road and the app treated the pair as done.
+
+    colonist has no field for how many free roads remain, and its action state
+    clears once the first is down -- observed as 30 -> 31 -> 0 with the second
+    road still to come. Counting them from the card is what survives that.
+    """
+    eng = GameEngine()
+    eng.my_color_id = 1
+    me = eng.my_color
+
+    eng._track_free_roads({"kind": "dev_card_played", "color": me, "card": "road_building"})
+    assert eng.free_roads == 2
+    eng._track_free_roads({"kind": "piece_placed", "color": me, "piece": "road"})
+    assert eng.free_roads == 1, "one road placed, one still owed"
+    eng._track_free_roads({"kind": "piece_placed", "color": me, "piece": "road"})
+    assert eng.free_roads == 0
+
+
+def test_somebody_else_playing_road_building_owes_us_nothing():
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng._track_free_roads({"kind": "dev_card_played", "color": "blue",
+                           "card": "road_building"})
+    assert eng.free_roads == 0
+
+
+def test_an_unplaced_free_road_does_not_survive_the_turn():
+    eng = GameEngine()
+    eng.my_color_id = 1
+    me = eng.my_color
+    eng._track_free_roads({"kind": "dev_card_played", "color": me, "card": "road_building"})
+    eng._track_free_roads({"kind": "turn_ended", "color": me})
+    assert eng.free_roads == 0
+
+
+def test_only_one_development_card_a_turn():
+    """colonist reports it directly; both paths that offer cards must respect it."""
+    from app.live.advisor import dev_card_plays
+
+    played = _seated(0, phase="main")
+    played.me.dev_cards.knight = 2
+    played.me.dev_card_played_this_turn = True
+    assert not [m for m in solver.solve(played) if m.steps[0].type.startswith("play_")]
+
+    class Eng(GameEngine):
+        def my_dev_cards(self):
+            return {"count": 2, "known": {"knight": 2}, "hidden": 0, "used": 1,
+                    "bought_this_turn": {}, "playable": {"knight": 2},
+                    "played_this_turn": True}
+
+    assert dev_card_plays(Eng(), played) == []

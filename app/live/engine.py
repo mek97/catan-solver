@@ -49,6 +49,10 @@ class GameEngine:
         self.events: list[dict] = []
         self.trade_memory = TradeMemory()
         self.game_key: Optional[tuple] = None
+        # Road Building grants two roads. colonist has no field for how many
+        # are left, and its action state clears after the first one is placed,
+        # so the second placement had nothing telling us it was still owed.
+        self.free_roads = 0
         self._seen_log_ids: set[int] = set()
 
     # --- ingest -------------------------------------------------------------
@@ -128,6 +132,8 @@ class GameEngine:
         if not self.state:
             return []
         new_events = self._read_log(diff.get("gameLogState") or {})
+        for ev in new_events:
+            self._track_free_roads(ev)
         self.state = P.deep_merge(self.state, diff)
         # Read trades from merged state, never from the diff: a diff carries
         # only the fields that changed, so a response arrives detached from the
@@ -153,6 +159,20 @@ class GameEngine:
     def is_my_turn(self) -> bool:
         cur = (self.state.get("currentState") or {}).get("currentTurnPlayerColor")
         return cur == self.my_color_id
+
+    def _track_free_roads(self, ev: dict) -> None:
+        """Count out the two roads Road Building owes us."""
+        if ev.get("color") != self.my_color:
+            if ev.get("kind") == "turn_started":
+                self.free_roads = 0
+            return
+        kind = ev.get("kind")
+        if kind == "dev_card_played" and ev.get("card") == "road_building":
+            self.free_roads = 2
+        elif kind in ("piece_placed", "piece_bought") and ev.get("piece") == "road":
+            self.free_roads = max(0, self.free_roads - 1)
+        elif kind in ("turn_ended", "turn_started"):
+            self.free_roads = 0
 
     def dice_thrown(self) -> bool:
         """Has the active player rolled yet this turn?
@@ -570,7 +590,9 @@ class GameEngine:
             pending = "discard"
         elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
             pending = "move_robber"
-        elif action in P.ACTION_ROAD_BUILDING and self.is_my_turn():
+        elif self.is_my_turn() and (
+            action in P.ACTION_ROAD_BUILDING or self.free_roads > 0
+        ):
             # Road Building's two free placements. Without this the advice
             # vanishes the moment the card is played: the card leaves the hand,
             # so the move that showed where the roads go stops being generated,
