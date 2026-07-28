@@ -505,3 +505,21 @@ def test_the_plans_actually_disagree_somewhere():
         if len(answers) > 1:
             disagreed += 1
     assert disagreed, "the plans are indistinguishable on every board tried"
+
+
+def test_a_hand_over_the_discard_limit_is_discounted():
+    """Roughly every other round somebody rolls a seven, and half of everything
+    above the limit goes back. Counting the whole hand spends cards that in
+    practice are lost -- catanatron's tuned evaluation carries the same term."""
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+
+    cfg.me.hand = {r: 2 for r in rules.RESOURCES}          # 10 cards, over the limit
+    ctx = solver.build_ctx(cfg)
+    discounted = economy._build_position(cfg, ctx).hand
+    assert sum(discounted.values()) < 10, "cards at risk are not cards in hand"
+
+    cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 2, "wheat": 1}   # 7, at the limit
+    safe = economy._build_position(cfg, solver.build_ctx(cfg)).hand
+    assert sum(safe.values()) == 7, "at the limit nothing is discarded"

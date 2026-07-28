@@ -403,9 +403,24 @@ def _build_position(cfg: BoardConfig, ctx) -> _Position:
         target = max(rules.LONGEST_ROAD_MIN, max(ctx.opp_road_len.values(), default=0) + 1)
         roads_for_longest = max(0, target - ctx.my_road_len)
 
+    # A hand over the discard limit is not worth what it says. Roughly every
+    # other round somebody rolls a seven, and half of everything above the
+    # limit goes back to the bank -- so the ladder was spending cards that in
+    # practice are lost. catanatron's tuned evaluation carries the same term
+    # (discard_penalty, applied above seven); this is that idea priced in
+    # cards rather than as a flat score.
+    hand = {r: float(cfg.me.hand.get(r, 0)) for r in RESOURCES}
+    held = sum(hand.values())
+    limit = cfg.me.discard_limit
+    if held > limit:
+        seats = max(1, len(cfg.players))
+        seven = 1.0 - (5.0 / 6.0) ** seats      # a seven before our next turn
+        keep = 1.0 - seven * (held // 2) / held
+        hand = {r: n * keep for r, n in hand.items()}
+
     return _Position(
         cfg=cfg,
-        hand={r: float(cfg.me.hand.get(r, 0)) for r in RESOURCES},
+        hand=hand,
         rate=production_rate(cfg, me),
         rates=dict(ctx.rates),
         vp=ctx.my_vp,
