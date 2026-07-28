@@ -381,12 +381,22 @@ def test_an_award_we_reach_first_is_still_ours():
     ]
 
 
-def test_the_race_says_when_each_award_goes():
+def test_an_exclusive_award_is_claimed_by_exactly_one_player():
+    """Six cards for two points is the best rate on the board, so asked in
+    isolation every ladder takes Longest Road first -- each computing the roads
+    it needs against today's map, so all of them conclude they are three roads
+    away. One of them is right."""
     cfg = load(phase="main")
     for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
         _settle(cfg, color, v)
     r = solver.race(cfg)
-    assert set(r["deadlines"]) <= {"longest_road", "army"}
-    for kind, when in r["deadlines"].items():
-        assert any(s["kind"] == kind and s["at"] == when
-                   for steps in r["plans"].values() for s in steps)
+
+    assert set(r["claims"]) <= set(solver.EXCLUSIVE)
+    for kind, who in r["claims"].items():
+        assert who in cfg.players
+        # everybody else has it taken off them, us included
+        assert (kind in r["deadlines"]) == (who != cfg.me.color)
+        others = [c for c in r["plans"] if c != who]
+        assert not any(s["kind"] == kind for c in others for s in r["plans"][c]), (
+            f"{kind} is {who}'s; nobody else should still be planning it"
+        )

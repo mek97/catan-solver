@@ -46,6 +46,9 @@ TOP_N = 8
 # variance. Charged here in turns per overlapping pip.
 OVERLAP_TURNS = 0.12
 
+# awards exactly one player can hold
+EXCLUSIVE = ("longest_road", "army")
+
 # Most a single robber placement may be credited with costing one opponent.
 # Blocking the only hex of a thin position can look like it ends their game,
 # and without a ceiling a knight outscores every build on the board. The
@@ -1126,15 +1129,23 @@ def _opponent_turns(cfg: BoardConfig, color: str) -> float:
 
 
 def race(cfg: BoardConfig) -> dict[str, Any]:
-    """Everyone's clock, not just ours.
+    """Everyone's clock and everyone's route, with the awards shared out once.
 
-    turns_to_win answers "how fast can I reach ten points", which is only the
-    right question if nobody else is trying. Judged that way a player nine
+    turns_to_win answers "how fast can I reach ten points". That is only the
+    right question if nobody else is trying: judged that way a player nine
     turns behind still gets told to build their fourth city, because the
     measure cannot see that the game ends first.
+
+    Two passes, because Longest Road and Largest Army go to exactly one player.
+    Asked in isolation every ladder takes Longest Road first -- six cards for
+    two points is the best rate on the board, and each player computes the
+    roads it needs against today's map, so all four conclude they are three
+    roads away. Only one of them is. The first pass finds who genuinely gets
+    there first; the second re-plans everybody else without it, which is what
+    turns three identical road plans into the cities and knights the table is
+    actually building.
     """
-    out: dict[str, float] = {}
-    plans: dict[str, list[dict]] = {}
+    views = {}
     for color in cfg.players:
         view = cfg.model_copy(deep=True)
         view.me = MyState(
@@ -1142,33 +1153,39 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
             hand=dict(cfg.me.hand) if color == cfg.me.color else {},
             bank_rates=cfg.me.bank_rates if color == cfg.me.color else None,
         )
-        ctx = build_ctx(view)
-        # The route, not just its length. Working out where an opponent is
-        # going and then keeping it to ourselves is a strange way to advise:
-        # which corner they want is exactly what decides whether to hurry for
-        # it, and it costs nothing extra to answer -- the ladder walks it
-        # either way.
-        route = economy.plan(view, ctx)
-        out[color] = economy.turns_to_win(view, ctx)
+        views[color] = (view, build_ctx(view))
+
+    # pass 1: nobody contests anything, purely to see who arrives first
+    claim: dict[str, tuple[str, float]] = {}
+    for color, (view, ctx) in views.items():
+        for step in economy.plan(view, ctx):
+            kind = step["kind"]
+            if kind in EXCLUSIVE and step["at"] < claim.get(kind, (None, economy.LOST))[1]:
+                claim[kind] = (color, step["at"])
+
+    # pass 2: everyone but the first claimant plans without it
+    turns: dict[str, float] = {}
+    plans: dict[str, list[dict]] = {}
+    for color, (view, ctx) in views.items():
+        due = {k: at for k, (who, at) in claim.items() if who != color}
+        turns[color] = economy.turns_to_win(view, ctx, deadlines=due)
+        route = economy.plan(view, ctx, deadlines=due)
         if color != cfg.me.color:
             plans[color] = [
                 {**r, "where": board.describe_vertex(cfg.hexes, r["vertex"])
                  if r["vertex"] is not None else ""}
                 for r in route[:2]
             ]
-    mine = out.get(cfg.me.color, economy.LOST)
-    rivals = {c: t for c, t in out.items() if c != cfg.me.color}
+
+    mine = turns.get(cfg.me.color, economy.LOST)
+    rivals = {c: t for c, t in turns.items() if c != cfg.me.color}
     leader = min(rivals, key=lambda c: rivals[c], default=None)
-    # when each exclusive award is expected to be gone, by the fastest rival
-    deadlines: dict[str, float] = {}
-    for steps in plans.values():
-        for s in steps:
-            if s["kind"] in ("longest_road", "army"):
-                deadlines[s["kind"]] = min(deadlines.get(s["kind"], economy.LOST), s["at"])
     return {
-        "turns": out,
+        "turns": turns,
         "plans": plans,
-        "deadlines": deadlines,
+        # what we may not count on, because somebody else gets there first
+        "deadlines": {k: at for k, (who, at) in claim.items() if who != cfg.me.color},
+        "claims": {k: who for k, (who, _at) in claim.items()},
         "mine": mine,
         "leader": leader,
         "leader_turns": rivals.get(leader, economy.LOST) if leader else economy.LOST,
