@@ -456,7 +456,19 @@ const openCats = new Set(["incoming"]);
 function renderActions(rec, groups) {
   const box = $("#actions");
   box.replaceChildren();
-  for (const cat of CATS) {
+  // Best category first. This only became meaningful once every score was in
+  // turns: while placements were counted in weighted pips and offers in
+  // something else, a fixed order was the only honest arrangement, because the
+  // numbers could not be compared. Empty categories keep their declared order
+  // at the bottom, so the panel still has a shape you can learn.
+  const ranked = [...CATS].sort((a, b) => {
+    const sa = groups[a.key]?.[0], sb = groups[b.key]?.[0];
+    if (!sa && !sb) return CATS.indexOf(a) - CATS.indexOf(b);
+    if (!sa) return 1;
+    if (!sb) return -1;
+    return (sb.score ?? 0) - (sa.score ?? 0);
+  });
+  for (const cat of ranked) {
     const items = groups[cat.key] || [];
     const wrap = document.createElement("section");
     wrap.className = `cat${items.length ? "" : " empty"}${openCats.has(cat.key) && items.length ? " open" : ""}`;
