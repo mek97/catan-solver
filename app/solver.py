@@ -637,6 +637,22 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                         best_combo = cand
         if best_combo:
             score, missing, b = best_combo
+            # The card gives two cards, always. Taking only what the build is
+            # short of throws the other half away when the build needs one --
+            # so the spare goes to whatever we produce least of, provided the
+            # bank has it.
+            stock = ctx.cfg.bank
+            missing = dict(missing)
+            while sum(missing.values()) < 2:
+                spare = next(
+                    (r for r in sorted(RESOURCES, key=lambda x: ctx.my_pips.get(x, 0))
+                     if stock is None
+                     or stock.get(r, rules.BANK_PER_RESOURCE) > missing.get(r, 0)),
+                    None,
+                )
+                if spare is None:
+                    break
+                missing[spare] = missing.get(spare, 0) + 1
             out.append(
                 ScoredMove(
                     steps=[MoveStep(type="play_year_of_plenty", get=missing)] + b.steps,
@@ -649,15 +665,28 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                 )
             )
         else:
-            scarce = sorted(RESOURCES, key=lambda r: ctx.my_pips.get(r, 0))[:2]
-            out.append(
-                ScoredMove(
-                    steps=[MoveStep(type="play_year_of_plenty", get={r: 1 for r in scarce})],
-                    score=1.0,
-                    reasoning=f"Year of Plenty: take {scarce[0]} and {scarce[1]}, your scarcest resources.",
-                    location_hint=f"play Year of Plenty and take {scarce[0]} + {scarce[1]}",
+            # You take these from the bank, so the bank has to have them. The
+            # branch above checks that; this one did not, and would happily
+            # name a resource the bank had run out of.
+            stock = ctx.cfg.bank
+            scarce = [
+                r for r in sorted(RESOURCES, key=lambda r: ctx.my_pips.get(r, 0))
+                if stock is None or stock.get(r, rules.BANK_PER_RESOURCE) > 0
+            ][:2]
+            if scarce:
+                take = {r: 1 for r in scarce}
+                out.append(
+                    ScoredMove(
+                        steps=[MoveStep(type="play_year_of_plenty", get=take)],
+                        score=1.0,
+                        reasoning=(
+                            "Year of Plenty: take "
+                            + " and ".join(scarce)
+                            + ", your scarcest resources."
+                        ),
+                        location_hint="play Year of Plenty and take " + " + ".join(scarce),
+                    )
                 )
-            )
     if dc.monopoly >= 1 and ctx.opp_vp:
         best_r, best_ev = None, 0.0
         for r in RESOURCES:
