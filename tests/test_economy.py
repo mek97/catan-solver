@@ -278,3 +278,36 @@ def test_a_reported_rate_still_wins_where_it_is_better():
     cfg.players["red"].settlements = _spread(cfg, 1)
     cfg.me.bank_rates = {**{r: 4 for r in rules.RESOURCES}, "sheep": 2}
     assert solver.build_ctx(cfg).rates["sheep"] == 2
+
+
+def test_a_corner_a_rival_reaches_first_is_not_planned_on():
+    """The ladder used to queue up spots someone else was closer to.
+
+    Costing a settlement three roads away, while an opponent sits one road from
+    it, is planning around a corner you will not get.
+    """
+    cfg = load(phase="main")
+    spots = _spread(cfg, 6)
+    _settle(cfg, "red", spots[0])
+    ctx = solver.build_ctx(cfg)
+    pos = economy._seed_spots(economy._build_position(cfg, ctx))
+    open_to_us = economy._road_paths(cfg, "red", set())
+    far = max(open_to_us, key=lambda v: len(open_to_us[v]))
+    assert open_to_us[far], "need a corner we are not already on"
+
+    assert far in pos.spots, "uncontested, it should be in the plan"
+    # put blue's road network right next to it
+    pos.rivals = {**pos.rivals, far: 0}
+    assert far not in economy._reachable(pos), "a closer rival takes it off the plan"
+
+
+def test_a_tie_is_still_worth_planning_for():
+    """Arriving together is a race, not a loss."""
+    cfg = load(phase="main")
+    _settle(cfg, "red", _spread(cfg, 3)[0])
+    ctx = solver.build_ctx(cfg)
+    pos = economy._seed_spots(economy._build_position(cfg, ctx))
+    paths = economy._road_paths(cfg, "red", set())
+    v = next(iter(pos.spots))
+    pos.rivals = {**pos.rivals, v: len(paths[v])}
+    assert v in economy._reachable(pos)

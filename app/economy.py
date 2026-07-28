@@ -214,6 +214,7 @@ class _Position:
     claimed: set[int]            # every corner I hold, real or simulated
     spots: dict[int, list[int]]  # vertex -> the road edges still needed for it
     laid: set[int]               # roads the ladder has already committed to
+    rivals: dict[int, int]       # vertex -> roads the nearest opponent needs
     knights: int
     knights_for_army: int  # 0 when Largest Army is out of reach
     roads_for_longest: int  # 0 when Longest Road is out of reach
@@ -357,8 +358,29 @@ def _reachable(pos: _Position) -> dict[int, list[int]]:
     return {
         v: path
         for v, path in _road_paths(pos.cfg, pos.cfg.me.color, pos.laid).items()
+        # Somebody else wants these corners too. A plan built on a spot an
+        # opponent can reach first is a plan that loses the spot, and the
+        # ladder would keep costing it as though it were waiting patiently.
+        # Ties stay ours: arriving together is a race we may win.
+        if pos.rivals.get(v, len(path) + 1) >= len(path)
         if v not in blocked
     }
+
+
+def _rival_distances(cfg: BoardConfig) -> dict[int, int]:
+    """Roads each open corner is from the nearest opponent's network.
+
+    Computed once for the position rather than per rung: our own building
+    changes what we can reach, but it does not move anyone else's roads.
+    """
+    out: dict[int, int] = {}
+    for color in cfg.players:
+        if color == cfg.me.color:
+            continue
+        for v, path in _road_paths(cfg, color, set()).items():
+            if len(path) < out.get(v, MAX_ROAD_REACH + 1):
+                out[v] = len(path)
+    return out
 
 
 def _build_position(cfg: BoardConfig, ctx) -> _Position:
@@ -394,6 +416,7 @@ def _build_position(cfg: BoardConfig, ctx) -> _Position:
         claimed=set(p.settlements) | set(p.cities),
         spots={},
         laid=set(),
+        rivals=_rival_distances(cfg),
         knights=p.knights_played,
         knights_for_army=knights_for_army,
         roads_for_longest=roads_for_longest,
