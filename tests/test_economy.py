@@ -244,3 +244,37 @@ def test_the_robber_cannot_outweigh_every_build():
     _settle(cfg, "blue", spots[1])
     cfg.players["blue"].resource_count = 8
     assert solver.solve(cfg)[0].score <= solver.ROBBER_CAP + 1.0
+
+
+def test_a_port_you_would_take_is_worth_something():
+    """Colonist reports the rates you have now, not the ones a move would give.
+
+    Taking its number verbatim priced every port at zero in live games, because
+    the settlement that earns the better rate has not been placed yet -- so the
+    solver never saw a reason to settle one.
+    """
+    from app.models import Port
+
+    cfg = load(phase="main")
+    me = cfg.players["red"]
+    spots = _spread(cfg, 4)
+    me.settlements = spots[:2]
+    port_at = spots[2]
+    cfg.ports = [Port(type="ore", vertices=[port_at, board.VERTEX_ADJ[port_at][0]])]
+    me.roads = [board.VERTEX_EDGES[port_at][0]]
+    # a live game: colonist says every rate is currently 4:1
+    cfg.me.bank_rates = {r: 4 for r in rules.RESOURCES}
+
+    on_port = solver._after(cfg, [solver.MoveStep(type="build_settlement", vertex=port_at)])
+    assert solver.build_ctx(on_port).rates["ore"] == 2, "the port must count once taken"
+
+    elsewhere = solver._after(cfg, [solver.MoveStep(type="build_settlement", vertex=spots[3])])
+    assert solver.build_ctx(elsewhere).rates["ore"] == 4
+
+
+def test_a_reported_rate_still_wins_where_it_is_better():
+    """Our port parsing cannot know about rule variants; colonist can."""
+    cfg = load(phase="main")
+    cfg.players["red"].settlements = _spread(cfg, 1)
+    cfg.me.bank_rates = {**{r: 4 for r in rules.RESOURCES}, "sheep": 2}
+    assert solver.build_ctx(cfg).rates["sheep"] == 2

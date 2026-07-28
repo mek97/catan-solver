@@ -178,16 +178,18 @@ def build_ctx(cfg: BoardConfig) -> Ctx:
         for port in cfg.ports
         if any(v in ctx.my_buildings for v in port.vertices)
     }
+    # Colonist reports the rates you have *now*, which is authoritative about
+    # rule variants our port parsing cannot know about. But a candidate move
+    # that settles a port would change them, and the reported number knows
+    # nothing about a settlement that has not been placed -- taking it verbatim
+    # priced every port at zero in live games, so the solver never once saw a
+    # reason to settle one. Take the better of the two: simulation only ever
+    # adds buildings, so the derived rate can only improve on reality.
     authoritative = cfg.me.bank_rates or {}
     for r in RESOURCES:
-        if r in authoritative:
-            ctx.rates[r] = authoritative[r]
-        elif r in my_ports:
-            ctx.rates[r] = 2
-        elif "3:1" in my_ports:
-            ctx.rates[r] = 3
-        else:
-            ctx.rates[r] = 4
+        derived = 2 if r in my_ports else (3 if "3:1" in my_ports else 4)
+        reported = authoritative.get(r)
+        ctx.rates[r] = min(reported, derived) if reported is not None else derived
 
     my_p = cfg.players[me]
     ctx.my_vp = (
