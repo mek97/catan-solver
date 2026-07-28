@@ -943,3 +943,24 @@ def test_a_refused_price_is_not_offered_again():
     assert _choose_partner(mem, cands, "sheep", "ore", 1, surplus) is None, (
         "out of prices we can afford -- stop asking"
     )
+
+
+def test_nothing_is_proposed_before_the_dice_are_rolled():
+    """Trades and bank swaps are illegal pre-roll, so they must not be offered.
+
+    The solver already restricts its own moves to a development card or the
+    roll, but proposals and bank options were computed from the position alone
+    -- so the panel told you to roll in one box and to ask green for ore in the
+    next, the second one in much larger type.
+    """
+    from app.live.advisor import bank_options, trade_proposals
+
+    eng = replay()
+    cfg = eng.board_config()
+    cfg.pending = "roll"
+    assert trade_proposals(eng, cfg) == []
+    assert bank_options(eng, cfg) == []
+
+    # and once the dice are done, whatever was available comes back
+    cfg.pending = None
+    assert trade_proposals(eng, cfg) or bank_options(eng, cfg)

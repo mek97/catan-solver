@@ -407,7 +407,14 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
 
     Partner choice uses their production (who actually makes the resource),
     their hand size, and what they have already refused.
+
+    Nothing here is legal before the dice. The solver already knows that and
+    emits only a development card or the roll, but this ran on the position
+    alone and so kept proposing trades -- the panel would tell you to roll in
+    one box and to ask green for ore in the next, the second one louder.
     """
+    if cfg.pending == "roll":
+        return []
     ctx = solver.build_ctx(cfg)
     hand = cfg.me.hand
     mem = eng.trade_memory
@@ -503,6 +510,8 @@ def bank_options(eng: GameEngine, cfg: BoardConfig, limit: int = 4) -> list[dict
     category read "nothing available" while you were sitting on four sheep.
     This lists what the rates and the bank's stock genuinely allow.
     """
+    if cfg.pending == "roll":
+        return []       # nothing but a development card happens before the dice
     ctx = solver.build_ctx(cfg)
     hand = cfg.me.hand
     stock = cfg.bank or {}

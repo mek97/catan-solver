@@ -704,15 +704,26 @@ function renderPrimary(rec, groups) {
   const box = $("#primary");
   const best = bestOverall(groups);
   const pass = rec?.moves?.find((m) => m.steps[0].type === "end_turn");
+  // Before the dice the turn has not started, so "end your turn" is the wrong
+  // thing to fall back to -- the answer is to roll.
+  const preRoll = rec?.pending === "roll";
   const idle = (why) => {
+    const tag = preRoll ? "first" : rec?.my_turn ? "pass" : "hold";
+    const act = preRoll
+      ? "roll the dice"
+      : rec?.my_turn ? "end your turn" : "nothing worth doing";
     box.innerHTML = `<div class="hero hero-pass" style="--cat:var(--dim)">
-        <div class="hero-top"><span class="hero-cat">${rec?.my_turn ? "pass" : "hold"}</span></div>
-        <div class="hero-act">${rec?.my_turn ? "end your turn" : "nothing worth doing"}</div>
+        <div class="hero-top"><span class="hero-cat">${tag}</span></div>
+        <div class="hero-act">${act}</div>
         <div class="hero-why"></div>
       </div>`;
     box.querySelector(".hero-why").textContent = why;
     state.heroMove = null;
   };
+  if (preRoll && (!best || (best.item.score ?? 0) <= 0)) {
+    // a development card is the one thing that may go first, so it still wins
+    return idle("Nothing may be traded or built until the dice are rolled.");
+  }
 
   if (!best) {
     if (pass || rec) idle("Nothing available — bank your cards.");
