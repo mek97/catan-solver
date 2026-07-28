@@ -225,17 +225,46 @@ def _fmt(c: Counter) -> str:
 
 
 def offer_advice(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
-    """Verdicts for every open offer that is ours to answer.
+    """Every open offer on the table: theirs to answer, and ours to chase.
 
     An offer stays on the table after you answer it, waiting on the player who
     made it, and colonist records your reply on it. Re-advising one you have
     already accepted or declined asks you to decide something twice and hides
     the fact that the trade is simply in progress -- so an answered offer is
     reported as waiting rather than as a choice.
+
+    Offers *we* made used to be dropped here outright, on the reasoning that
+    there is no decision left to make. There is: colonist records who accepted
+    and who declined, and that is exactly the information you need to pick a
+    partner and close the trade. Skipping them meant an offer you put on the
+    table appeared nowhere at all -- you could not see that two players had
+    already said yes.
     """
     out = []
     for offer in eng.trade_offers():
         if offer.get("from_me"):
+            said = offer.get("responses") or {}
+            yes = sorted(c for c, r in said.items() if r == TRADE_ACCEPTED)
+            no = sorted(c for c, r in said.items() if r == TRADE_DECLINED)
+            out.append({
+                "id": offer.get("id"),
+                "from": cfg.me.color,
+                "mine": True,
+                "verdict": "yours",
+                "score": 0.0,
+                "accepted": yes,
+                "declined": no,
+                "text": (
+                    f"{', '.join(yes)} accepted — take it."
+                    if yes
+                    else (
+                        f"{', '.join(no)} declined; nobody has taken it yet."
+                        if no
+                        else "On the table, nobody has answered yet."
+                    )
+                ),
+                "offer": offer,
+            })
             continue
         answered = offer.get("my_response") in (TRADE_ACCEPTED, TRADE_DECLINED)
         if answered:

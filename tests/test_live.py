@@ -223,7 +223,35 @@ def test_every_open_offer_gets_a_usable_verdict():
             assert v["counter"]["give"] and v["counter"]["get"]
 
 
-def test_our_own_offers_are_not_self_advised():
+def test_our_own_offers_are_shown_but_never_self_advised():
+    """An offer we made is reported, without a verdict on our own trade.
+
+    It used to be dropped entirely, which meant an offer you had put on the
+    table appeared nowhere -- not even the fact that somebody had accepted it.
+    Who said yes is the reason to show it at all.
+    """
+    from app.live.advisor import offer_advice
+    from app.live.trades import RESPONSE_ACCEPT, RESPONSE_DECLINE
+
+    eng = replay()
+    cfg = eng.board_config()
+    others = [c for c in eng.play_order if c != eng.my_color_id]
+    eng.state.setdefault("tradeState", {})["activeOffers"] = {
+        "x": {"id": "x", "creator": eng.my_color_id, "offeredResources": [3],
+              "wantedResources": [5],
+              "playerResponses": {str(others[0]): RESPONSE_ACCEPT,
+                                  str(others[1]): RESPONSE_DECLINE}},
+    }
+    [ours] = offer_advice(eng, cfg)
+    assert ours["mine"] is True
+    # never accept/reject/counter: it is our own offer, there is nothing to judge
+    assert ours["verdict"] == "yours"
+    assert ours["accepted"] and ours["declined"]
+    assert set(ours["accepted"]) & set(ours["declined"]) == set()
+    assert "accepted" in ours["text"]
+
+
+def test_an_unanswered_offer_of_ours_says_so():
     from app.live.advisor import offer_advice
 
     eng = replay()
@@ -232,7 +260,9 @@ def test_our_own_offers_are_not_self_advised():
         "x": {"id": "x", "creator": eng.my_color_id, "offeredResources": [3],
               "wantedResources": [5], "playerResponses": {}},
     }
-    assert offer_advice(eng, cfg) == []
+    [ours] = offer_advice(eng, cfg)
+    assert ours["accepted"] == [] and ours["declined"] == []
+    assert "nobody has answered" in ours["text"]
 
 
 def test_authoritative_bank_rates_win_over_geometry():

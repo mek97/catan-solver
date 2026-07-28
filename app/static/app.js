@@ -571,7 +571,7 @@ function renderTrades(rec) {
 
 const VERDICT_WORD = {
   accept: "Accept", reject: "Reject", counter: "Counter",
-  waiting: "Waiting", cannot: "Can't",
+  waiting: "Waiting", cannot: "Can't", yours: "Yours",
 };
 
 /* Incoming offers, drawn the way the game draws them -- their cards, an arrow,
@@ -583,26 +583,42 @@ function renderOffers(rec) {
   const advice = (rec?.offer_advice || []).filter((a) => a.verdict !== "cannot");
   if (!advice.length) { box.replaceChildren(); box.classList.remove("has"); return; }
   box.classList.add("has");
+  // one you have to answer runs on their clock; one you made runs on yours
+  advice.sort((a, b) => (a.mine ? 1 : 0) - (b.mine ? 1 : 0));
 
   box.innerHTML = advice.map((a) => {
     const o = a.offer || {};
-    // `offers` is what they hand over, `wants` is what they ask of you
+    // `offers` is what the creator hands over, `wants` is what they ask for --
+    // so which side is yours depends on who made it
+    const iGet = a.mine ? o.wants : o.offers;
+    const iGive = a.mine ? o.offers : o.wants;
     const counter = a.counter
       ? `<div class="ctr">instead offer
            ${cardRow(Object.entries(a.counter.give || {})
              .flatMap(([r, n]) => Array(n).fill(r)), "want")}</div>`
       : "";
+    // who has answered an offer of ours, which is the whole point of showing it
+    const said = a.mine
+      ? `<div class="said">
+           ${(a.accepted || []).map((c) => `<span class="rsp yes ${c}">${c} accepted</span>`).join("")}
+           ${(a.declined || []).map((c) => `<span class="rsp no ${c}">${c} declined</span>`).join("")}
+           ${!(a.accepted || []).length && !(a.declined || []).length
+             ? '<span class="rsp none">no answers yet</span>' : ""}
+         </div>`
+      : "";
     return `
       <article class="offer v-${a.verdict}">
         <header>
-          <span class="who ${o.from || ""}">${o.from || "someone"}</span>
+          <span class="who ${a.mine ? "me" : (o.from || "")}">${
+            a.mine ? "your offer" : (o.from || "someone")}</span>
           <span class="verdict">${VERDICT_WORD[a.verdict] || a.verdict}</span>
         </header>
         <div class="swap">
-          <div class="side"><span class="slab">you get</span>${cardRow(o.offers, "get")}</div>
+          <div class="side"><span class="slab">you get</span>${cardRow(iGet, "get")}</div>
           <span class="arrow">⇄</span>
-          <div class="side"><span class="slab">you give</span>${cardRow(o.wants, "want")}</div>
+          <div class="side"><span class="slab">you give</span>${cardRow(iGive, "want")}</div>
         </div>
+        ${said}
         <p class="why"></p>
         ${counter}
       </article>`;
