@@ -251,3 +251,47 @@ def test_you_may_only_rob_someone_on_that_hex():
         who = m.steps[0].steal_from
         if who:
             assert who in on_hex and who != cfg.me.color
+
+
+# --- §5 the buy-turn restriction, everywhere it can leak ---------------------
+
+
+class _Bought:
+    """We just bought a knight; nothing else in hand."""
+
+    def my_dev_cards(self):
+        return {"count": 1, "known": {"knight": 1}, "hidden": 0, "used": 0,
+                "bought_this_turn": {"knight": 1}, "playable": {},
+                "played_this_turn": False}
+
+    def player_summary(self):
+        return []
+
+    def production_table(self):
+        return {}
+
+
+def test_a_knight_bought_this_turn_advertises_nothing():
+    """§5: a card cannot be played the turn it was purchased.
+
+    Three separate places decided whether a knight was available, and each had
+    its own idea of what "available" meant: the solver, the dev-card panel, and
+    the robber panel. All three now ask the same question.
+    """
+    from app.live.advisor import dev_card_plays, robber_options
+
+    cfg = _position()
+    cfg.me.dev_cards.knight = 0          # nothing playable reaches the solver
+
+    assert robber_options(_Bought(), cfg) == [], "no robber advice off an unplayable knight"
+    assert dev_card_plays(_Bought(), cfg) == []
+    assert not [m for m in solver.solve(cfg) if m.steps[0].type == "play_knight"]
+
+
+def test_a_forced_robber_move_is_still_advised():
+    """A 7 moves the robber whatever is in hand."""
+    from app.live.advisor import robber_options
+
+    cfg = _position()
+    cfg.pending = "move_robber"
+    assert robber_options(_Bought(), cfg), "the 7 does not care what you bought"

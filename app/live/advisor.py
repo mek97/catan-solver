@@ -587,9 +587,25 @@ def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[di
     so we return nothing rather than advertise a move you cannot make.
     """
     forced = cfg.pending == "move_robber"
-    dev = eng.my_dev_cards() if eng is not None else {"count": 0, "known": {}, "hidden": 0}
-    # a masked dev card might be a knight; a known hand tells us outright
-    could_knight = dev["known"].get("knight", 0) > 0 or dev["hidden"] > 0
+    dev = (
+        eng.my_dev_cards() if eng is not None
+        else {"count": 0, "known": {}, "hidden": 0, "playable": {},
+              "bought_this_turn": {}, "played_this_turn": False}
+    )
+    # What we could play, not what we hold. A knight bought this turn cannot be
+    # played until the next one, and reading the whole hand here advertised the
+    # robber on the strength of a card the rules will not let you use -- the
+    # third place that made the same mistake, after the solver and the dev-card
+    # panel. A masked card might still be a knight, unless it is one of the
+    # ones just bought.
+    fresh = sum((dev.get("bought_this_turn") or {}).values())
+    could_knight = (
+        not dev.get("played_this_turn")
+        and (
+            (dev.get("playable") or {}).get("knight", 0) > 0
+            or max(0, dev.get("hidden", 0) - fresh) > 0
+        )
+    )
     if not forced and not could_knight:
         return []
 
