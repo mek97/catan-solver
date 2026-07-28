@@ -1134,6 +1134,7 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
     measure cannot see that the game ends first.
     """
     out: dict[str, float] = {}
+    plans: dict[str, list[dict]] = {}
     for color in cfg.players:
         view = cfg.model_copy(deep=True)
         view.me = MyState(
@@ -1141,12 +1142,33 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
             hand=dict(cfg.me.hand) if color == cfg.me.color else {},
             bank_rates=cfg.me.bank_rates if color == cfg.me.color else None,
         )
-        out[color] = economy.turns_to_win(view, build_ctx(view))
+        ctx = build_ctx(view)
+        # The route, not just its length. Working out where an opponent is
+        # going and then keeping it to ourselves is a strange way to advise:
+        # which corner they want is exactly what decides whether to hurry for
+        # it, and it costs nothing extra to answer -- the ladder walks it
+        # either way.
+        route = economy.plan(view, ctx)
+        out[color] = economy.turns_to_win(view, ctx)
+        if color != cfg.me.color:
+            plans[color] = [
+                {**r, "where": board.describe_vertex(cfg.hexes, r["vertex"])
+                 if r["vertex"] is not None else ""}
+                for r in route[:2]
+            ]
     mine = out.get(cfg.me.color, economy.LOST)
     rivals = {c: t for c, t in out.items() if c != cfg.me.color}
     leader = min(rivals, key=lambda c: rivals[c], default=None)
+    # when each exclusive award is expected to be gone, by the fastest rival
+    deadlines: dict[str, float] = {}
+    for steps in plans.values():
+        for s in steps:
+            if s["kind"] in ("longest_road", "army"):
+                deadlines[s["kind"]] = min(deadlines.get(s["kind"], economy.LOST), s["at"])
     return {
         "turns": out,
+        "plans": plans,
+        "deadlines": deadlines,
         "mine": mine,
         "leader": leader,
         "leader_turns": rivals.get(leader, economy.LOST) if leader else economy.LOST,
@@ -1228,15 +1250,17 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     # so the pair worth making is chosen by the measure that ranks it. Picking
     # them by pips first let the old objective veto, before the real one ever
     # saw them, exactly the moves the turns model exists to find.
-    base = economy.turns_to_win(cfg, ctx)
     contest = race(cfg)
     weight, leader = _denial_weight(contest["behind"]), contest["leader"]
+    # an award a rival takes first is not ours to plan around
+    due = contest["deadlines"]
+    base = economy.turns_to_win(cfg, ctx, deadlines=due)
 
     def priced(candidates: list[ScoredMove]) -> list[ScoredMove]:
         out = []
         for m in candidates:
             nxt = _after(cfg, m.steps)
-            gain = base - economy.turns_to_win(nxt, build_ctx(nxt))
+            gain = base - economy.turns_to_win(nxt, build_ctx(nxt), deadlines=due)
             # Taking a corner can cost the leader more than it saves us, and
             # measuring only our own clock made those moves look like losses.
             # Only placements are checked: nothing else we build reaches them.

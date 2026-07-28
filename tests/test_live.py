@@ -681,3 +681,25 @@ def test_bank_trades_survive_a_hidden_bank():
     cfg = _one_settlement({"sheep": 5, "wheat": 1})
     cfg.bank = None  # what a hidden bank projects to
     assert bank_options(_Table(), cfg), "an unknown bank must not block trading"
+
+
+def test_the_one_brick_a_road_needs_is_never_the_thing_offered():
+    """Reported live: holding 1 brick, 1 sheep, 1 wheat, 1 ore.
+
+    The advice was "Offer brick or wheat for 1 wood -- that completes a road
+    this turn". A road is a wood and a brick; giving the brick away leaves you
+    holding a wood and no road. trade_proposals had already been fixed for
+    this; a second function was answering the same question and had not been,
+    which is the case against answering it twice.
+    """
+    from app.live.advisor import trade_advice, trade_proposals
+
+    cfg = _one_settlement({"brick": 1, "sheep": 1, "wheat": 1, "ore": 1})
+    for p in trade_proposals(_Table(), cfg):
+        if p["for"] == "road":
+            assert "brick" not in p["give"], "the brick is what the road needs"
+            assert p["get"] == {"wood": 1}
+
+    assert not any(t.get("type") == "want" for t in trade_advice(_Table(), cfg)), (
+        "the duplicate suggestion path should be gone, not fixed in parallel"
+    )

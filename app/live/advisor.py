@@ -33,32 +33,13 @@ def trade_advice(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
     ctx = solver.build_ctx(cfg)
     my_pips = ctx.my_pips
 
-    # what am I closest to affording?
-    targets = []
-    for name in ("settlement", "city", "road", "dev"):
-        need = _shortfall(hand, COSTS[name])
-        targets.append((sum(need.values()), name, need))
-    targets.sort()
-    for missing, name, need in targets:
-        if 0 < missing <= 2:
-            give = sorted(
-                (r for r in RESOURCES if hand.get(r, 0) > 0 and r not in need),
-                key=lambda r: -(hand.get(r, 0) * (1 + my_pips.get(r, 0) / 10)),
-            )
-            if give:
-                out.append(
-                    {
-                        "type": "want",
-                        "need": need,
-                        "for": name,
-                        "offer": give[:2],
-                        "text": (
-                            f"Offer {' or '.join(give[:2])} for "
-                            f"{', '.join(f'{n} {r}' for r, n in need.items())} — "
-                            f"that completes a {name} this turn."
-                        ),
-                    }
-                )
+    # "what should I ask for" is answered by trade_proposals, which names the
+    # partner, prices the offer, and remembers what each player has refused.
+    # This function used to answer it too, and worse: it offered anything not
+    # in the shortfall, so holding one brick it would offer the brick to get
+    # the wood for a road -- leaving you holding a wood and no road. The same
+    # bug was fixed in trade_proposals and survived here, which is the argument
+    # against having answered it twice.
 
     # resources I over-produce are cheap for me to trade away
     rich = [r for r in RESOURCES if my_pips.get(r, 0) >= 8]
@@ -609,14 +590,15 @@ def victory_plan(eng: GameEngine, cfg: BoardConfig) -> dict[str, Any]:
     """The route to ten points, so a turn with no affordable move still says
     something. "Nothing to do" and "nothing to aim for" are different answers."""
     ctx = solver.build_ctx(cfg)
+    due = solver.race(cfg)["deadlines"]
     steps = []
-    for s in economy.plan(cfg, ctx):
+    for s in economy.plan(cfg, ctx, deadlines=due):
         where = (
             board.describe_vertex(cfg.hexes, s["vertex"]) if s["vertex"] is not None else ""
         )
         steps.append({**s, "where": where})
     return {
-        "turns": round(economy.turns_to_win(cfg, ctx), 1),
+        "turns": round(economy.turns_to_win(cfg, ctx, deadlines=due), 1),
         "vp": ctx.my_vp,
         "steps": steps,
     }

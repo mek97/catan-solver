@@ -428,7 +428,9 @@ def _seed_spots(pos: _Position) -> _Position:
     return pos
 
 
-def _climb(cfg: BoardConfig, ctx, record: bool = False) -> tuple[float, list[dict]]:
+def _climb(
+    cfg: BoardConfig, ctx, record: bool = False, deadlines: Optional[dict] = None
+) -> tuple[float, list[dict]]:
     """Estimated turns to reach 10 victory points, and optionally the route.
 
     Greedy: repeatedly take whichever point is cheapest in turns-per-point, and
@@ -450,6 +452,12 @@ def _climb(cfg: BoardConfig, ctx, record: bool = False) -> tuple[float, list[dic
             # would rank a two-point award above a one-point city at nine
             # points, where the city wins outright and the eleventh point is
             # worth nothing.
+            # Longest Road and Largest Army go to one player. Every ladder
+            # plans them anyway, ours and theirs alike, so four players can
+            # each be counting the same two points. If somebody reaches one
+            # first it is not ours to plan around.
+            if deadlines and rung.kind in deadlines and total + t + 1.0 > deadlines[rung.kind]:
+                continue
             worth = min(rung.vp, rules.VICTORY_POINTS_TO_WIN - pos.vp)
             per_vp = (t + 1.0) / worth  # +1: the build itself takes a turn
             if best is None or per_vp < best[0]:
@@ -472,16 +480,20 @@ def _climb(cfg: BoardConfig, ctx, record: bool = False) -> tuple[float, list[dic
     return min(total, LOST), route
 
 
-def turns_to_win(cfg: BoardConfig, ctx) -> float:
-    """Estimated turns to reach 10 victory points from this position."""
-    return _climb(cfg, ctx)[0]
+def turns_to_win(cfg: BoardConfig, ctx, deadlines: Optional[dict] = None) -> float:
+    """Estimated turns to reach 10 victory points from this position.
+
+    `deadlines` maps an exclusive award to when a rival is expected to take it;
+    past that moment it stops counting towards our ten.
+    """
+    return _climb(cfg, ctx, deadlines=deadlines)[0]
 
 
-def plan(cfg: BoardConfig, ctx) -> list[dict]:
+def plan(cfg: BoardConfig, ctx, deadlines: Optional[dict] = None) -> list[dict]:
     """The fastest route to 10 points we can see from here.
 
     Worth showing even when no move is affordable: "nothing to do this turn" is
     not the same as "nothing to aim for", and at nine points holding two cards
     the second is the only thing the player actually wants to know.
     """
-    return _climb(cfg, ctx, record=True)[1]
+    return _climb(cfg, ctx, record=True, deadlines=deadlines)[1]

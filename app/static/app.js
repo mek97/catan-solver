@@ -342,9 +342,6 @@ function categorise(rec) {
   for (const p of rec.proposals || []) {
     out.offer.push({ score: p.score ?? 0, text: p.text, why: null });
   }
-  for (const t of rec.trades || []) {
-    if (t.type === "want") out.offer.push({ score: 0, text: t.text, why: null });
-  }
   // an over-limit hand is a risk, not an obligation: spending it down is a
   // bank action, so it belongs with the bank trades rather than in alerts
   if (rec.discard && !rec.discard.required) {
@@ -561,6 +558,19 @@ function tradeRead(hist, color) {
   return html ? `<div class="ptrade">${html}</div>` : "";
 }
 
+// What this player is going for. We work it out anyway to know how fast they
+// win; keeping it to ourselves would be a strange way to advise, since which
+// corner they want is what decides whether to hurry for it.
+function rivalPlan(race, color) {
+  const steps = race?.plans?.[color];
+  if (!steps?.length) return "";
+  const t = race.turns?.[color];
+  return `<div class="rival-plan"><span class="tlbl">plan</span>` +
+    (t != null && t < 80 ? `<span class="rp-eta">${t.toFixed(0)}t</span>` : "") +
+    steps.map((s) => `<span class="rp-step">${PLAN_LABEL[s.kind] || s.kind}` +
+      `<i>+${s.vp}</i></span>`).join("") + `</div>`;
+}
+
 function renderIntel(rec) {
   const players = $("#players");
   players.replaceChildren();
@@ -585,7 +595,8 @@ function renderIntel(rec) {
         p.dev_used ? ` (${p.dev_used} played)` : ""}</div>
       <div class="chips">${chips}${unk || (known.length ? "" : '<span class="chip unk">—</span>')}</div>
       ${prod ? `<div class="prod">${prod}</div>` : ""}
-      ${p.is_me ? "" : tradeRead(hist, p.color)}`;
+      ${p.is_me ? "" : tradeRead(hist, p.color)}
+      ${p.is_me ? "" : rivalPlan(rec?.race, p.color)}`;
     players.appendChild(card);
   });
 

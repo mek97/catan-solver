@@ -346,6 +346,13 @@ main { display: flex; height: 100vh; }
 .clock.me { color: var(--dim); }
 .clock i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 
+/* where a rival is heading */
+.rival-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+.rp-eta { font: 600 10px var(--mono); color: var(--dim); }
+.rp-step { font: 400 10px var(--mono); color: var(--faint); background: rgba(255,255,255,.05);
+  border-radius: 3px; padding: 1px 5px; }
+.rp-step i { font-style: normal; color: #8fc63f; margin-left: 3px; }
+
 /* what a player has actually done at the trade table */
 .ptrade { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 5px;
   padding-top: 5px; border-top: 1px dashed rgba(255,255,255,.08); }

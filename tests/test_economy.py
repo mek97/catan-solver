@@ -347,3 +347,46 @@ def test_a_move_that_costs_the_leader_more_than_it_costs_us_is_worth_making():
     assert contested["leader"] == "blue"
     # the weight is what carries a denial into positive territory at all
     assert solver._denial_weight(contested["behind"]) > 0
+
+
+def test_an_award_a_rival_takes_first_stops_counting():
+    """Longest Road and Largest Army go to one player.
+
+    Every ladder plans them anyway, ours and each opponent's alike, so a
+    four-player table can have four players counting the same two points. On
+    recorded games this alone made the estimate up to six turns optimistic.
+    """
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    ctx = solver.build_ctx(cfg)
+
+    counting_on_it = [s["kind"] for s in economy.plan(cfg, ctx)]
+    gone = [s["kind"] for s in economy.plan(
+        cfg, ctx, deadlines={"longest_road": 1.0, "army": 1.0})]
+
+    assert "longest_road" in counting_on_it, "the naive ladder plans the award"
+    assert "longest_road" not in gone, "a rival takes it first, so it is not ours"
+    assert "army" not in gone
+
+
+def test_an_award_we_reach_first_is_still_ours():
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    ctx = solver.build_ctx(cfg)
+    far_off = {"longest_road": 90.0, "army": 90.0}
+    assert [s["kind"] for s in economy.plan(cfg, ctx, deadlines=far_off)] == [
+        s["kind"] for s in economy.plan(cfg, ctx)
+    ]
+
+
+def test_the_race_says_when_each_award_goes():
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    r = solver.race(cfg)
+    assert set(r["deadlines"]) <= {"longest_road", "army"}
+    for kind, when in r["deadlines"].items():
+        assert any(s["kind"] == kind and s["at"] == when
+                   for steps in r["plans"].values() for s in steps)
