@@ -195,12 +195,19 @@ def build_ctx(cfg: BoardConfig) -> Ctx:
         ctx.rates[r] = min(reported, derived) if reported is not None else derived
 
     my_p = cfg.players[me]
-    ctx.my_vp = (
+    # Counted from the board, but never below what the player is reported to
+    # hold: colonist's figure includes hidden point cards and awards, and for
+    # anyone but us the board is all we can see. Reading it from buildings
+    # alone told the race that a rival on seven points still needed nine of
+    # them, so the front-runner looked like the least urgent player at the
+    # table -- and the robber went after whoever was least dangerous.
+    ctx.my_vp = max(
         len(my_p.settlements)
         + 2 * len(my_p.cities)
         + (2 if my_p.longest_road else 0)
         + (2 if my_p.largest_army else 0)
-        + cfg.me.dev_cards.vp
+        + cfg.me.dev_cards.vp,
+        my_p.vp_visible,
     )
     ctx.vp_mult = 2.0 if ctx.my_vp >= 8 else (1.4 if ctx.my_vp == 7 else 1.0)
 
@@ -1204,6 +1211,39 @@ def _denial_weight(behind: float) -> float:
     return _clamp(0.25 + 0.12 * behind, 0.25, 1.0)
 
 
+def _dev_card_value(ctx: Ctx, base: float, due: dict) -> float:
+    """What an unknown development card is worth, in turns.
+
+    Buying one scored exactly nothing before -- the same as ending the turn.
+    The position after the purchase is three cards lighter and holds a card
+    whose face nobody can see, so turns_to_win has nothing to price, and every
+    card the deck is mostly made of went uncredited.
+
+    A deck is a distribution, though, and its two useful faces are both
+    measurable. A hidden point is a real point. A knight is worth the turns it
+    takes off whoever it blocks, plus the ground it makes up towards Largest
+    Army -- which is the whole reason to keep buying while somebody else is
+    ahead on the board.
+    """
+    cfg = ctx.cfg
+    odds = rules.dev_card_odds()
+
+    point = cfg.model_copy(deep=True)
+    point.me.dev_cards.vp += 1
+    vp_gain = base - economy.turns_to_win(point, build_ctx(point), deadlines=due)
+
+    knight = cfg.model_copy(deep=True)
+    knight.players[cfg.me.color].knights_played += 1
+    army_gain = base - economy.turns_to_win(knight, build_ctx(knight), deadlines=due)
+
+    # the best thing that knight could do to somebody, if we drew it
+    denial = max(
+        (m.score for m in _score_robber(ctx, _robber_moves(ctx, step_type="play_knight"))),
+        default=0.0,
+    )
+    return odds["victory_point"] * vp_gain + odds["knight"] * (army_gain + max(0.0, denial))
+
+
 def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
     """Re-price robber placements as turns taken off opponents, not pips.
 
@@ -1218,7 +1258,7 @@ def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
     if not others:
         return moves
     baseline = {c: _opponent_turns(cfg, c) for c in others}
-    leader_vp = max(ctx.opp_vp.values(), default=0)
+    field = min(baseline.values())
     my_base = economy.turns_to_win(cfg, ctx)
 
     out = []
@@ -1228,19 +1268,21 @@ def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
             out.append(m)
             continue
         nxt = _after(cfg, m.steps)
-        cost_to_them = 0.0
+        # Only the front-runner's clock binds. Slowing third place by four
+        # turns does not bring the game any closer to us -- and summing the
+        # setback across everyone the hex touches valued one placement at
+        # eleven turns, more than winning outright. What a block is worth is
+        # how much longer the *fastest* remaining opponent now needs, which
+        # also prices the case where blocking the leader merely promotes
+        # somebody else: then nothing has changed and it scores nothing.
+        after = dict(baseline)
         for c in others:
-            if not any(
+            if any(
                 hid in board.VERTEX_HEXES[v]
                 for v in cfg.players[c].settlements + cfg.players[c].cities
             ):
-                continue
-            # slowing the front-runner is worth more than slowing the last place
-            weight = 1.0 if ctx.opp_vp.get(c, 0) >= leader_vp else 0.6
-            setback = _clamp(_opponent_turns(nxt, c) - baseline[c], 0.0, ROBBER_CAP)
-            cost_to_them += weight * setback
-        # capped both ways: unblocking your own hex is as bounded a gain as
-        # blocking theirs is a loss
+                after[c] = _opponent_turns(nxt, c)
+        cost_to_them = _clamp(min(after.values()) - field, 0.0, ROBBER_CAP)
         mine = _clamp(my_base - economy.turns_to_win(nxt, build_ctx(nxt)),
                       -ROBBER_CAP, ROBBER_CAP)
         steal = 0.35 if m.steps[0].steal_from else 0.0
@@ -1272,6 +1314,7 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     # an award a rival takes first is not ours to plan around
     due = contest["deadlines"]
     base = economy.turns_to_win(cfg, ctx, deadlines=due)
+    dev_worth = _dev_card_value(ctx, base, due)
 
     def priced(candidates: list[ScoredMove]) -> list[ScoredMove]:
         out = []
@@ -1283,6 +1326,8 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
             # Only placements are checked: nothing else we build reaches them.
             if leader and any(s.vertex is not None for s in m.steps):
                 gain += weight * (_opponent_turns(nxt, leader) - contest["leader_turns"])
+            if m.steps[-1].type == "buy_dev":
+                gain += dev_worth
             out.append(m.model_copy(update={"score": round(gain, 2)}))
         return out
 

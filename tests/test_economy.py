@@ -400,3 +400,48 @@ def test_an_exclusive_award_is_claimed_by_exactly_one_player():
         assert not any(s["kind"] == kind for c in others for s in r["plans"][c]), (
             f"{kind} is {who}'s; nobody else should still be planning it"
         )
+
+
+def test_a_players_reported_points_are_not_ignored():
+    """Counting a rival's points off the board alone misses hidden cards and
+    awards, so a player on seven looked like one on one -- and the race then
+    treated the front-runner as the least urgent player at the table."""
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    rival = next(c for c in cfg.players if c != cfg.me.color)
+    cfg.players[rival].vp_visible = 8
+
+    assert solver._opponent_turns(cfg, rival) < solver._opponent_turns(
+        cfg, next(c for c in cfg.players if c not in (cfg.me.color, rival))
+    ), "eight points has to read as closer to winning than two"
+
+
+def test_a_development_card_is_worth_more_than_nothing():
+    """Buying one scored exactly zero -- the same as ending the turn -- because
+    the position cannot see the face of the card it just bought."""
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    cfg.players[next(c for c in cfg.players if c != cfg.me.color)].vp_visible = 8
+    ctx = solver.build_ctx(cfg)
+    due = solver.race(cfg)["deadlines"]
+    base = economy.turns_to_win(cfg, ctx, deadlines=due)
+    assert solver._dev_card_value(ctx, base, due) > 0
+
+
+def test_the_robber_is_priced_against_the_front_runner_not_the_whole_table():
+    """Slowing third place by four turns does not bring the game closer to us.
+
+    Summing the setback over everyone a hex touches valued one placement at
+    eleven turns -- more than winning outright.
+    """
+    cfg = load(pending="move_robber")
+    for color, v in zip(("red", "blue", "orange"), _spread(cfg, 3)):
+        _settle(cfg, color, v)
+    cfg.players["blue"].vp_visible = 8
+    best = solver.solve(cfg)[0]
+    assert best.score <= 2 * solver.ROBBER_CAP + 1
+    assert best.steps[0].robber_hex in board.VERTEX_HEXES[
+        cfg.players["blue"].settlements[0]
+    ], "the front-runner is the one worth blocking"
