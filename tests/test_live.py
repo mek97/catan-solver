@@ -869,3 +869,16 @@ def test_a_hidden_bank_still_reaches_the_solver():
     assert eng.bank_stock() == {}, "the reported numbers are not read"
     counted = eng.counted_bank(4)
     assert set(counted) == set(rules.RESOURCES) and all(v > 0 for v in counted.values())
+
+
+def test_the_tracker_never_claims_more_cards_than_a_player_holds():
+    """The one invariant that matters for an inference: it may know less than
+    the truth, never more. Across the recorded games it is short by one or two
+    exactly where a steal happened, which is the honest answer."""
+    eng = replay()
+    for p in eng.player_summary():
+        if p["is_me"]:
+            continue
+        assert sum(p["hand"]["known"].values()) <= p["cards"], (
+            f"{p['color']}: claims to know more than it holds"
+        )
