@@ -42,15 +42,23 @@ def map_color(color_id: Any) -> Optional[str]:
     return PALETTE[(color_id - 1) % len(PALETTE)]
 
 BUILDING = {1: "settlement", 2: "city"}
-# Development cards. colonist substitutes 10 for any card it is hiding from
-# us (opponents' hands and the bank), so 10 deliberately has no mapping —
-# an unmapped value means "held, but we don't get to know what it is".
+# Development cards. 10 is the placeholder colonist substitutes for any card it
+# is hiding from us (opponents' hands, the bank), so it deliberately has no
+# mapping -- an unmapped value means "held, but not ours to see".
+#
+# The real values were identified from recorded games by correlating each with
+# the log entry it produced when played, rather than guessed:
+#   11 -> log 66 achievementEnum 0 (Largest Army), and by far the most played
+#   13 -> log 86 amountStolen (a monopoly haul)
+#   15 -> log 21 cardEnums [x, y] (two cards taken)
+#   12 -> appears in hands, never in a Used list (a point is never played)
+#   14 -> only the generic "played" entry, and confirmed against a known hand
 DEV_CARD = {
-    0: "knight",
-    1: "victory_point",
-    2: "road_building",
-    3: "year_of_plenty",
-    4: "monopoly",
+    11: "knight",
+    12: "victory_point",
+    13: "monopoly",
+    14: "road_building",
+    15: "year_of_plenty",
 }
 DEV_HIDDEN = 10
 PIECE = {0: "road", 2: "settlement", 3: "city", 5: "robber"}
@@ -93,6 +101,10 @@ LOG = {
     64: "info",
     73: "info",
     74: "info",
+    20: "dev_card_played",
+    21: "year_of_plenty_taken",
+    66: "achievement",
+    86: "monopoly_stole",
     115: "trade_player",
     116: "trade_bank",
     118: "trade_offered",
@@ -210,6 +222,17 @@ def describe_log(entry: dict) -> Optional[dict]:
         ev["cards"] = [CARD.get(c, c) for c in text.get("cardsToBroadcast", [])]
     elif kind in ("card_stolen", "cards_discarded"):
         ev["cards"] = [CARD.get(c, c) for c in text.get("cardEnums", [])]
+    elif kind == "dev_card_played":
+        ev["card"] = DEV_CARD.get(text.get("cardEnum"), "unknown")
+    elif kind == "year_of_plenty_taken":
+        ev["cards"] = [CARD.get(c, c) for c in text.get("cardEnums", [])]
+    elif kind == "monopoly_stole":
+        ev["resource"] = CARD.get(text.get("cardEnum"))
+        ev["amount"] = text.get("amountStolen")
+    elif kind == "achievement":
+        ev["achievement"] = {0: "largest_army", 1: "longest_road"}.get(
+            text.get("achievementEnum"), text.get("achievementEnum")
+        )
     elif kind == "trade_player":
         ev["with"] = map_color(text.get("acceptingPlayerColor"))
         ev["gave"] = [CARD.get(c, c) for c in text.get("givenCardEnums", [])]
