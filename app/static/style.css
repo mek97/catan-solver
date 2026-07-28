@@ -333,6 +333,16 @@ main { display: flex; height: 100vh; }
 .dcard.unknown { background: rgba(255,255,255,.06); color: var(--faint); }
 .dcard.spent { background: none; color: var(--faint); }
 
+/* a searching engine's answer, beside our own */
+#engine { display: flex; align-items: baseline; gap: 7px; margin: 8px 12px 0;
+  padding: 7px 9px; border-radius: 6px; background: rgba(96,165,250,.08);
+  border: 1px solid rgba(96,165,250,.22); font: 400 11px var(--mono); }
+.eng-tag { font: 600 9px var(--mono); letter-spacing: .07em; text-transform: uppercase;
+  color: #93c5fd; }
+.eng-tag.agrees { color: #8fc63f; }
+.eng-text { flex: 1; color: var(--dim); }
+.eng-meta { color: var(--faint); font-size: 10px; }
+
 /* the route to ten points */
 #intel-plan { border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
 #intel-plan > summary { cursor: pointer; font: 600 10px var(--mono); letter-spacing: .08em;

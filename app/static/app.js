@@ -674,8 +674,25 @@ function renderPanel(rec) {
   renderPrimary(rec, groups);
   renderActions(rec, groups);
   drawHint(state.heroMove);
+  renderEngine(rec);
   renderPlan(rec);
   renderIntel(rec);
+}
+
+// catanatron's answer, beside ours. Agreement is reassuring; disagreement is
+// the interesting case, which is why it is shown even when it differs.
+function renderEngine(rec) {
+  const box = $("#engine");
+  const e = rec?.engine;
+  if (!box) return;
+  if (!e) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const ours = state.heroMove?.location_hint || "";
+  const agrees = ours && e.where && ours.includes(e.where.slice(0, 18));
+  box.innerHTML =
+    `<span class="eng-tag${agrees ? " agrees" : ""}">${agrees ? "agrees" : "engine"}</span>` +
+    `<span class="eng-text">${e.text}</span>` +
+    `<span class="eng-meta">${e.legal_moves} legal · depth ${e.depth}</span>`;
 }
 
 const PLAN_LABEL = {

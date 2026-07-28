@@ -308,6 +308,83 @@ def best_action(cfg, player=None, depth: int = 3):
     return player.decide(game, actions), actions
 
 
+def describe(cfg, action) -> dict[str, Any]:
+    """Their action, in our vocabulary and on our board.
+
+    Their node and edge ids mean nothing to a player looking at colonist, so
+    the answer is translated back the way it came: node -> our vertex -> the
+    corners it touches, edge -> our edge -> the hexes it runs between.
+    """
+    kind = str(action.action_type).split(".")[-1]
+    nodes = node_mapping(dress_map(cfg))
+    value = action.value
+    where = ""
+    ours: dict[str, Any] = {}
+
+    if kind in ("BUILD_SETTLEMENT", "BUILD_CITY") and isinstance(value, int):
+        vid = nodes.get(value)
+        if vid is not None:
+            ours["vertex"] = vid
+            where = board.describe_vertex(cfg.hexes, vid)
+    elif kind == "BUILD_ROAD" and isinstance(value, (tuple, list)) and len(value) == 2:
+        a, b = (nodes.get(value[0]), nodes.get(value[1]))
+        if a is not None and b is not None:
+            edges = edge_mapping(nodes)
+            eid = edges.get(tuple(sorted((value[0], value[1]))))
+            if eid is not None:
+                ours["edge"] = eid
+                where = board.describe_edge(cfg.hexes, eid)
+    elif kind == "MARITIME_TRADE" and value:
+        give = [c for c in value[:-1] if c]
+        where = f"give {', '.join(str(c).lower() for c in give)} for {str(value[-1]).lower()}"
+    elif kind == "MOVE_ROBBER" and value:
+        cube = value[0] if isinstance(value, (tuple, list)) else value
+        hid = hex_mapping(dress_map(cfg)).get(tuple(cube)) if cube else None
+        if hid is not None:
+            ours["robber_hex"] = hid
+            where = board.describe_hex(cfg.hexes, hid)
+
+    return {
+        "action": kind,
+        "where": where,
+        "text": (VERB.get(kind, kind.replace("_", " ").lower()) + (f" — {where}" if where else "")),
+        **ours,
+    }
+
+
+VERB = {
+    "BUILD_SETTLEMENT": "settle",
+    "BUILD_CITY": "upgrade to a city",
+    "BUILD_ROAD": "build a road",
+    "BUY_DEVELOPMENT_CARD": "buy a development card",
+    "MARITIME_TRADE": "trade with the bank",
+    "PLAY_KNIGHT_CARD": "play a knight",
+    "PLAY_ROAD_BUILDING": "play Road Building",
+    "PLAY_YEAR_OF_PLENTY": "play Year of Plenty",
+    "PLAY_MONOPOLY": "play Monopoly",
+    "MOVE_ROBBER": "move the robber",
+    "ROLL": "roll the dice",
+    "END_TURN": "end your turn",
+}
+
+
+def second_opinion(cfg, depth: int = 3) -> Optional[dict[str, Any]]:
+    """What a searching engine would play here, or None if it cannot be asked.
+
+    Returned alongside our own recommendation rather than instead of it. They
+    disagree on most positions, and when they do it is worth seeing both --
+    a disagreement is either a judgement call or a move we failed to generate,
+    and those look identical until you compare them.
+    """
+    if supported(cfg):
+        return None
+    try:
+        action, actions = best_action(cfg, depth=depth)
+    except Exception:
+        return None
+    return {**describe(cfg, action), "legal_moves": len(actions), "depth": depth}
+
+
 def verify(cfg) -> dict[str, Any]:
     """Check the translation describes the same board we started from.
 

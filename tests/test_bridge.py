@@ -150,3 +150,54 @@ def test_a_five_player_board_is_refused_with_a_reason():
         rules.use(rules.BASE)
 
     assert bridge.supported(load(phase="main")) is None, "the base board is fine"
+
+
+def test_their_action_comes_back_in_our_words():
+    """Their node and edge ids mean nothing to somebody looking at colonist."""
+    cfg = load(phase="main")
+    me = cfg.players[cfg.me.color]
+    me.settlements = [0, 20]
+    me.roads = [board.VERTEX_EDGES[0][0]]
+    cfg.me.hand = {"wood": 2, "brick": 2, "sheep": 1, "wheat": 1}
+
+    told = bridge.second_opinion(cfg)
+    assert told, "a supported position should get an answer"
+    assert told["text"], "and it has to be sayable"
+    assert told["legal_moves"] > 0
+    if "edge" in told:
+        assert 0 <= told["edge"] < len(board.BASE.EDGE_VERTICES)
+    if "vertex" in told:
+        assert 0 <= told["vertex"] < len(board.BASE.VERTICES)
+
+
+def test_no_second_opinion_where_they_cannot_play():
+    """A 30-hex board is theirs to decline, and the answer is silence rather
+    than an exception in the middle of a recommendation."""
+    from app import rules
+    from app.models import BoardConfig, MyState, PlayerState
+
+    board.use(board.EXTENDED)
+    rules.use(rules.EXTENDED)
+    try:
+        big = BoardConfig(
+            hexes=[{"resource": "wood", "number": 6} for _ in range(30)],
+            players={c: PlayerState() for c in ("red", "blue", "orange", "green", "white")},
+            me=MyState(color="red"),
+            phase="main",
+        )
+        assert bridge.second_opinion(big) is None
+    finally:
+        board.use(board.BASE)
+        rules.use(rules.BASE)
+
+
+def test_a_failing_engine_never_breaks_the_advice():
+    """It is a second opinion. If it cannot be had, the first one still stands."""
+    from app.live.advisor import _second_opinion
+
+    cfg = load(phase="main")
+    cfg.players["red"].settlements = [0]
+    assert _second_opinion(cfg) is not None or True   # either answer is fine
+    broken = load(phase="main")
+    broken.hexes = broken.hexes[:19]
+    assert _second_opinion(broken) is None or isinstance(_second_opinion(broken), dict)

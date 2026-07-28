@@ -651,6 +651,25 @@ def victory_plan(eng: GameEngine, cfg: BoardConfig) -> dict[str, Any]:
     }
 
 
+def _second_opinion(cfg: BoardConfig) -> Optional[dict[str, Any]]:
+    """What catanatron's alpha-beta search would play here.
+
+    Shown next to our own recommendation, not in place of it. They disagree on
+    most positions, and a disagreement is either a judgement call or a move we
+    failed to generate -- which look identical until both answers are on screen
+    together. It is also the only opinion here that came from searching rather
+    than from evaluating one ply.
+
+    Absent on a 30-hex board or a fifth seat: catanatron plays neither.
+    """
+    try:
+        from .. import bridge
+
+        return bridge.second_opinion(cfg)
+    except Exception:
+        return None      # never let a second opinion break the first one
+
+
 def recommend(eng: GameEngine) -> dict[str, Any]:
     cfg = eng.board_config()
     moves: list[ScoredMove] = solver.solve(cfg)
@@ -663,6 +682,8 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "trade_history": trade_history(eng),
         "plan": victory_plan(eng, cfg),
         "race": solver.race(cfg),
+        # a searching engine's answer, beside ours rather than instead of it
+        "engine": _second_opinion(cfg),
         "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),
