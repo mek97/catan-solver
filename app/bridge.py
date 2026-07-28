@@ -36,10 +36,31 @@ RESOURCE_OUT = {
     "wood": "WOOD", "brick": "BRICK", "sheep": "SHEEP",
     "wheat": "WHEAT", "ore": "ORE", "desert": None,
 }
+# Their palette is RED, BLUE, ORANGE, WHITE; colonist deals green as its
+# fourth. Mapping green to nothing silently dropped that player, and a missing
+# player is not a smaller game -- their settlements are what cut everyone
+# else's roads, so every longest road came out wrong.
 COLOR_OUT = {
     "red": Color.RED, "blue": Color.BLUE,
-    "orange": Color.ORANGE, "white": Color.WHITE,
+    "orange": Color.ORANGE, "green": Color.WHITE,
 }
+MAX_SEATS = len(COLOR_OUT)
+
+# catanatron is a four-player, nineteen-hex engine: four colours, and a base
+# map whose land is the standard hexagon. It has no 5-6 player extension, so a
+# thirty-hex board or a fifth seat cannot cross over -- which is a limit of
+# theirs, not a gap in the translation, and worth saying rather than failing
+# obscurely halfway through building a state.
+def supported(cfg) -> Optional[str]:
+    """Why this position cannot be translated, or None if it can."""
+    if len(cfg.hexes) != 19:
+        return f"catanatron plays the 19-hex board; this one has {len(cfg.hexes)}"
+    if len(cfg.players) > MAX_SEATS:
+        return f"catanatron seats {MAX_SEATS} players; this game has {len(cfg.players)}"
+    unknown = sorted(set(cfg.players) - set(COLOR_OUT))
+    if unknown:
+        return f"no catanatron colour for {', '.join(unknown)}"
+    return None
 
 
 def _fresh_map() -> CatanMap:
@@ -111,6 +132,109 @@ def dress_map(cfg, catan_map: Optional[CatanMap] = None) -> CatanMap:
         tile.resource = RESOURCE_OUT[ours.resource]
         tile.number = ours.number
     return catan_map
+
+
+def to_state(cfg):
+    """A catanatron State holding our position.
+
+    Built through their own build_settlement / build_city / build_road rather
+    than by writing into the structures underneath, because those keep derived
+    things -- connected components, road lengths, who holds the longest -- in
+    step. Setting the pieces directly would leave a State that looks right and
+    answers questions wrong.
+
+    Roads are placed in whatever order connectivity allows: theirs validates
+    that a road touches your network, and ours arrives as an unordered set.
+    """
+    from catanatron.models.player import Player as _Player
+    from catanatron.state import State
+    from catanatron.state_functions import player_key
+
+    why = supported(cfg)
+    if why:
+        raise ValueError(why)
+
+    nodes = {v: k for k, v in node_mapping(dress_map(cfg)).items()}   # ours -> theirs
+    catan_map = dress_map(cfg)
+    seats = [c for c in cfg.players if c in COLOR_OUT]
+    players = [_Player(COLOR_OUT[c]) for c in seats]
+    state = State(players, catan_map)
+
+    for color in seats:
+        theirs = COLOR_OUT[color]
+        p = cfg.players[color]
+        for v in p.settlements:
+            state.board.build_settlement(theirs, nodes[v], initial_build_phase=True)
+        for v in p.cities:
+            state.board.build_settlement(theirs, nodes[v], initial_build_phase=True)
+            state.board.build_city(theirs, nodes[v])
+
+    pending = [(COLOR_OUT[c], e) for c in seats for e in cfg.players[c].roads]
+    while pending:
+        progressed = False
+        for item in list(pending):
+            theirs, eid = item
+            a, b = board.BASE.EDGE_VERTICES[eid]
+            try:
+                state.board.build_road(theirs, tuple(sorted((nodes[a], nodes[b]))))
+            except ValueError:
+                continue          # not connected yet; another road comes first
+            pending.remove(item)
+            progressed = True
+        if not progressed:
+            break                 # whatever is left cannot be reached from here
+
+    _fill_players(state, cfg, seats)
+    # Their longest-road length is cached in player_state and maintained by
+    # their state-level build path, which building through the board bypasses.
+    # Left unset it reads zero for everybody, and every feature that leans on
+    # it -- including who holds the trophy -- is quietly wrong.
+    for color in seats:
+        theirs = COLOR_OUT[color]
+        paths = state.board.continuous_roads_by_player(theirs)
+        longest = max((len(p) for p in paths), default=0)
+        state.player_state[f"{player_key(state, theirs)}_LONGEST_ROAD_LENGTH"] = longest
+    state.board.robber_coordinate = _robber_cube(cfg, catan_map)
+    return state
+
+
+def _robber_cube(cfg, catan_map: CatanMap):
+    for cube, hid in hex_mapping(catan_map).items():
+        if hid == cfg.robber_hex:
+            return cube
+    return next(iter(catan_map.land_tiles))
+
+
+def _fill_players(state, cfg, seats) -> None:
+    """Hands, cards and points, in the flat keys their features read."""
+    from catanatron.state_functions import player_key
+
+    for color in seats:
+        p = cfg.players[color]
+        key = player_key(state, COLOR_OUT[color])
+        mine = color == cfg.me.color
+        hand = cfg.me.hand if mine else {}
+        for r in ("wood", "brick", "sheep", "wheat", "ore"):
+            state.player_state[f"{key}_{RESOURCE_OUT[r]}_IN_HAND"] = hand.get(r, 0)
+        if not mine:
+            # their composition is hidden; the count is not
+            each, extra = divmod(p.resource_count, 5)
+            for i, r in enumerate(("wood", "brick", "sheep", "wheat", "ore")):
+                state.player_state[f"{key}_{RESOURCE_OUT[r]}_IN_HAND"] = each + (1 if i < extra else 0)
+        dev = cfg.me.dev_cards if mine else None
+        state.player_state[f"{key}_KNIGHT_IN_HAND"] = dev.knight if dev else 0
+        state.player_state[f"{key}_ROAD_BUILDING_IN_HAND"] = dev.road_building if dev else 0
+        state.player_state[f"{key}_YEAR_OF_PLENTY_IN_HAND"] = dev.year_of_plenty if dev else 0
+        state.player_state[f"{key}_MONOPOLY_IN_HAND"] = dev.monopoly if dev else 0
+        state.player_state[f"{key}_VICTORY_POINT_IN_HAND"] = dev.vp if dev else 0
+        state.player_state[f"{key}_PLAYED_KNIGHT"] = p.knights_played
+        state.player_state[f"{key}_HAS_ARMY"] = p.largest_army
+        state.player_state[f"{key}_HAS_ROAD"] = p.longest_road
+        vp = len(p.settlements) + 2 * len(p.cities) + (2 if p.longest_road else 0) + (2 if p.largest_army else 0)
+        state.player_state[f"{key}_VICTORY_POINTS"] = max(vp, p.vp_visible)
+        state.player_state[f"{key}_ACTUAL_VICTORY_POINTS"] = (
+            max(vp, p.vp_visible) + (dev.vp if dev else 0)
+        )
 
 
 def verify(cfg) -> dict[str, Any]:

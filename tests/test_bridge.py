@@ -52,3 +52,101 @@ def test_a_desert_stays_a_desert():
     dressed = bridge.dress_map(cfg)
     deserts = [t for t in dressed.land_tiles.values() if t.resource is None]
     assert len(deserts) == 1 and deserts[0].number is None
+
+
+def _live_positions():
+    """Every recorded position, replayed."""
+    from app.live.export import replay_frames
+    from app.live.feed import LiveFeed
+    from app.live.store import Store
+
+    src = Store()
+    rows = src._conn.execute(
+        "SELECT payload, direction, opcode FROM frames ORDER BY id"
+    ).fetchall()
+    feed = LiveFeed(store=Store(path=":memory:"))
+    for r in rows:
+        feed.ingest(r["payload"], r["direction"], r["opcode"])
+    for g in feed.store._conn.execute("SELECT game_id FROM games"):
+        eng = replay_frames(list(feed.store.replay_frames(g["game_id"])))
+        if not eng.state:
+            continue
+        cfg = eng.board_config()
+        if len(cfg.hexes) == 19 and len(cfg.players) <= bridge.MAX_SEATS:
+            yield g["game_id"], cfg
+
+
+def test_both_engines_agree_on_every_longest_road():
+    """The end-to-end check on the translation.
+
+    Longest road depends on every piece on the board: our roads, and the
+    opponents' settlements that cut them. If a single road landed on the wrong
+    edge, or a player went missing, the numbers part company. They do not, on
+    any player of any recorded position.
+    """
+    from catanatron.state_functions import get_longest_road_length
+
+    from app import solver
+
+    checked = 0
+    for _game, cfg in _live_positions():
+        state = bridge.to_state(cfg)
+        for color, p in cfg.players.items():
+            enemy = {
+                v for q in cfg.players.values() if q is not p
+                for v in q.settlements + q.cities
+            }
+            assert get_longest_road_length(
+                state, bridge.COLOR_OUT[color]
+            ) == solver._longest_road_length(set(p.roads), enemy), (
+                f"{color} disagrees in {_game}"
+            )
+            checked += 1
+    assert checked > 20, "the recordings should cover more than a handful"
+
+
+def test_every_piece_crosses_over():
+    for _game, cfg in _live_positions():
+        state = bridge.to_state(cfg)
+        for color, p in cfg.players.items():
+            theirs = bridge.COLOR_OUT[color]
+            roads = sum(1 for c in state.board.roads.values() if c == theirs) // 2
+            assert roads == len(p.roads), f"{color} lost roads in translation"
+
+
+def test_a_missing_seat_is_not_a_smaller_game():
+    """colonist deals green, their palette has white. Dropping the player
+    silently was not a smaller game -- their settlements are what cut everyone
+    else's roads, and every longest road came out wrong."""
+    assert set(bridge.COLOR_OUT) == {"red", "blue", "orange", "green"}
+    assert len(set(bridge.COLOR_OUT.values())) == 4, "four seats, four colours"
+
+
+def test_a_five_player_board_is_refused_with_a_reason():
+    """catanatron is a four-player, nineteen-hex engine -- four colours and no
+    5-6 player extension. A position it cannot hold should say so, not fail
+    obscurely halfway through building a state."""
+    import pytest
+
+    from app import rules
+    from app.models import BoardConfig, MyState, PlayerState
+
+    board.use(board.EXTENDED)
+    rules.use(rules.EXTENDED)
+    try:
+        big = BoardConfig(
+            hexes=[{"resource": "wood", "number": 6} for _ in range(30)],
+            players={c: PlayerState() for c in
+                     ("red", "blue", "orange", "green", "white")},
+            me=MyState(color="red"),
+            phase="main",
+        )
+        why = bridge.supported(big)
+        assert why and "19-hex" in why
+        with pytest.raises(ValueError):
+            bridge.to_state(big)
+    finally:
+        board.use(board.BASE)
+        rules.use(rules.BASE)
+
+    assert bridge.supported(load(phase="main")) is None, "the base board is fine"
