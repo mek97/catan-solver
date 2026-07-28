@@ -121,6 +121,13 @@ LOG = {
     10: "dice_rolled",
     11: "robber_moved",
     14: "card_stolen",
+    # A steal between two other players: we see the backs, never the faces.
+    # Undecoded, the card-tracker watched a thief's hand grow by nothing and a
+    # victim's shrink by nothing, and its inferences drifted from there.
+    16: "card_stolen_blind",
+    # "<hex> is blocked by the robber. No resources produced" -- the only
+    # statement of what a roll did *not* pay out.
+    49: "blocked_by_robber",
     44: "turn_ended",
     47: "cards_received",
     55: "cards_discarded",
@@ -135,6 +142,7 @@ LOG = {
     86: "monopoly_stole",
     115: "trade_player",
     116: "trade_bank",
+    117: "trade_offered_to",   # an offer aimed at one player, not the table
     118: "trade_offered",
 }
 
@@ -268,6 +276,21 @@ def describe_log(entry: dict) -> Optional[dict]:
     elif kind == "trade_bank":
         ev["gave"] = [CARD.get(c, c) for c in text.get("givenCardEnums", [])]
         ev["got"] = [CARD.get(c, c) for c in text.get("receivedCardEnums", [])]
+    elif kind == "card_stolen_blind":
+        ev["thief"] = map_color(text.get("playerColorThief"))
+        ev["victim"] = map_color(text.get("playerColorVictim"))
+        ev["count"] = len(text.get("cardBacks") or []) or 1
+    elif kind == "blocked_by_robber":
+        tile = text.get("tileInfo") or {}
+        ev["tile"] = {
+            "resource": RESOURCE.get(tile.get("resourceType")),
+            "number": tile.get("diceNumber"),
+        }
+    elif kind == "trade_offered_to":
+        ev["from"] = map_color(text.get("playerColorCreator"))
+        ev["to"] = map_color(text.get("playerColorOffered"))
+        ev["wants"] = [CARD.get(c, c) for c in text.get("wantedCardEnums", [])]
+        ev["offers"] = [CARD.get(c, c) for c in text.get("offeredCardEnums", [])]
     elif kind == "trade_offered":
         ev["wants"] = [CARD.get(c, c) for c in text.get("wantedCardEnums", [])]
         ev["offers"] = [CARD.get(c, c) for c in text.get("offeredCardEnums", [])]

@@ -703,3 +703,25 @@ def test_the_one_brick_a_road_needs_is_never_the_thing_offered():
     assert not any(t.get("type") == "want" for t in trade_advice(_Table(), cfg)), (
         "the duplicate suggestion path should be gone, not fixed in parallel"
     )
+
+
+def test_a_steal_between_two_others_still_moves_a_card():
+    """We see who took from whom, never what. That is enough to keep both
+    hands the right size; ignoring it drifts every later inference."""
+    from app.live.tracker import CardTracker
+
+    t = CardTracker(["red", "blue", "orange"])
+    t.apply({"kind": "card_stolen_blind", "thief": "blue", "victim": "orange", "count": 1})
+    assert t.stolen_by["blue"] == 1
+    assert t.stolen_from["orange"] == 1
+
+
+def test_the_events_we_cannot_read_are_not_pretended_to_be_read():
+    """describe_log names what it understands and leaves the rest labelled."""
+    from app.live import protocol as P
+
+    assert P.describe_log({"text": {"type": 16, "playerColorThief": 2,
+                                    "playerColorVictim": 4, "cardBacks": [0]}}) == {
+        "kind": "card_stolen_blind", "thief": "blue", "victim": "green", "count": 1}
+    unknown = P.describe_log({"text": {"type": 999}})
+    assert unknown["kind"] == "log_999", "an unknown type stays visibly unknown"

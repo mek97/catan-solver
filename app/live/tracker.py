@@ -68,6 +68,18 @@ class CardTracker:
             self.stolen_by[color] += 1
             if victim:
                 self.stolen_from[victim] += 1
+        elif kind == "card_stolen_blind":
+            # A steal between two other players. We are told who took from
+            # whom and how many, just never what -- which is still enough to
+            # keep both hands the right size. Left undecoded, a thief's hand
+            # grew by nothing here and a victim's shrank by nothing, and every
+            # inference after that drifted.
+            thief, victim = ev.get("thief"), ev.get("victim")
+            for _ in range(ev.get("count") or 1):
+                if thief:
+                    self.stolen_by[thief] += 1
+                if victim:
+                    self.stolen_from[victim] += 1
         elif kind in ("piece_placed", "piece_bought"):
             piece = ev.get("piece")
             cost = {
