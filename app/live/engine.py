@@ -174,6 +174,34 @@ class GameEngine:
         elif kind in ("turn_ended", "turn_started"):
             self.free_roads = 0
 
+    def setup_road_owed(self) -> Optional[int]:
+        """The settlement still waiting for the road that comes with it.
+
+        Setup places a settlement and then a road touching it, but the phase is
+        worked out from how many settlements are down -- so the moment the
+        settlement lands the phase reads as the *next* placement and the advice
+        jumps to a different corner, taking the road hint with it. A settlement
+        of ours with no road of ours attached is the one still owed.
+        """
+        me = self.my_color_id
+        ms = self.state.get("mapState") or {}
+        mine = [
+            self.maps["corners"].get(str(cid))
+            for cid, c in (ms.get("tileCornerStates") or {}).items()
+            if isinstance(c, dict) and c.get("owner") == me
+        ]
+        roads = {
+            self.maps["edges"].get(str(eid))
+            for eid, e in (ms.get("tileEdgeStates") or {}).items()
+            if isinstance(e, dict) and e.get("owner") == me
+        }
+        for v in mine:
+            if v is None:
+                continue
+            if not any(e in roads for e in board.VERTEX_EDGES[v]):
+                return v
+        return None
+
     def dice_thrown(self) -> bool:
         """Has the active player rolled yet this turn?
 
@@ -586,7 +614,10 @@ class GameEngine:
         action = self.action_state()
         phase = self.phase()
         pending = None
-        if action == P.ACTION_DISCARD:
+        owed = self.setup_road_owed() if phase != "main" else None
+        if owed is not None and self.is_my_turn():
+            pending = "setup_road"
+        elif action == P.ACTION_DISCARD:
             pending = "discard"
         elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
             pending = "move_robber"

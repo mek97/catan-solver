@@ -87,7 +87,7 @@ class BoardConfig(BaseModel):
     play_order: list[Color] = Field(default_factory=list)
     phase: Literal["setup1", "setup2", "main"] = "main"
     turn: Optional[Color] = None
-    pending: Optional[Literal["move_robber", "discard", "roll", "place_road", "steal"]] = None
+    pending: Optional[Literal["move_robber", "discard", "roll", "place_road", "steal", "setup_road"]] = None
 
     @model_validator(mode="after")
     def _check(self) -> "BoardConfig":

@@ -253,3 +253,39 @@ def test_an_offer_you_answered_is_not_asked_again():
     verdicts = {a["id"]: a["verdict"] for a in offer_advice(Eng(), cfg)}
     assert verdicts["a"] == "waiting", "already accepted -- in progress"
     assert verdicts["b"] != "waiting", "unanswered -- still a decision"
+
+
+def test_the_opening_road_is_shown_once_the_settlement_is_down():
+    """Reported live: place the opening settlement and the road hint vanishes.
+
+    The phase is worked out from how many settlements are down, so the moment
+    one lands the phase reads as the *next* placement and the advice jumps to a
+    different corner -- taking with it the road you still owe on this one.
+    """
+    cfg = _seated(0, phase="setup1")
+    first = solver.solve(cfg)[0]
+    v = first.steps[0].vertex
+
+    cfg.players["red"].settlements = [v]
+    cfg.phase = "setup2"          # what the engine reports at that moment
+    cfg.pending = "setup_road"
+
+    moves = solver.solve(cfg)
+    assert moves, "the road still has to be placed"
+    for m in moves:
+        assert m.steps[0].type == "setup_road"
+        assert v in board.EDGE_VERTICES[m.steps[0].edge], "it must touch that settlement"
+
+
+def test_the_engine_spots_a_settlement_with_no_road():
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.maps = {"corners": {"7": 7}, "edges": {"3": 3}, "hexes": {}}
+    eng.state = {"mapState": {"tileCornerStates": {"7": {"owner": 1}},
+                              "tileEdgeStates": {}}}
+    assert eng.setup_road_owed() == 7
+
+    attached = next(e for e in board.VERTEX_EDGES[7])
+    eng.maps["edges"] = {"3": attached}
+    eng.state["mapState"]["tileEdgeStates"] = {"3": {"owner": 1}}
+    assert eng.setup_road_owed() is None, "settled and connected -- nothing owed"

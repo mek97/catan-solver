@@ -928,6 +928,50 @@ def _draft_forecast(ctx: Ctx, mine: int, gap: int) -> list[int]:
     return open_now
 
 
+def _setup_road_moves(ctx: Ctx) -> list[ScoredMove]:
+    """Where the road that comes with an opening settlement should go.
+
+    It has to touch the settlement just placed, and its only job is to point at
+    the corner you want next -- so they are ranked by the best corner each one
+    brings within reach.
+    """
+    cfg = ctx.cfg
+    mine = set(cfg.players[cfg.me.color].roads)
+    anchor = next(
+        (v for v in cfg.players[cfg.me.color].settlements
+         if not any(e in mine for e in board.VERTEX_EDGES[v])),
+        None,
+    )
+    if anchor is None:
+        return _setup_moves(ctx)
+
+    out = []
+    for eid in board.VERTEX_EDGES[anchor]:
+        if eid in ctx.all_roads:
+            continue
+        a, b = board.EDGE_VERTICES[eid]
+        beyond = b if a == anchor else a
+        # what this direction opens: the best corner one step past it
+        reach = max(
+            (vertex_prod(ctx, w) for w in board.VERTEX_ADJ[beyond]
+             if w != anchor and board.is_vertex_placeable(w, ctx.occupied)),
+            default=0.0,
+        )
+        out.append(
+            ScoredMove(
+                steps=[MoveStep(type="setup_road", edge=eid)],
+                score=round(reach, 2),
+                reasoning=(
+                    "Opening road: it must touch the settlement you just placed, "
+                    "so point it at the corner you want next."
+                ),
+                location_hint=f"road on the {board.describe_edge(cfg.hexes, eid)}",
+            )
+        )
+    out.sort(key=lambda m: -m.score)
+    return out[:TOP_N]
+
+
 def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     cfg = ctx.cfg
     my_p = cfg.players[cfg.me.color]
@@ -1410,6 +1454,8 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     ctx = build_ctx(cfg)
     if cfg.pending == "move_robber":
         return _score_robber(ctx, _robber_moves(ctx))[:TOP_N]
+    if cfg.pending == "setup_road":
+        return _setup_road_moves(ctx)
     if cfg.phase in ("setup1", "setup2"):
         return _setup_moves(ctx)
     if cfg.pending == "roll":
