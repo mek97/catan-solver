@@ -227,8 +227,18 @@ class GameEngine:
         return out
 
     def bank_stock(self) -> dict[str, int]:
-        """Cards left in the bank; an empty pile cannot be traded for."""
-        cards = (self.state.get("bankState") or {}).get("resourceCards") or {}
+        """Cards left in the bank; an empty pile cannot be traded for.
+
+        Empty when the game hides them -- colonist says so outright with
+        hideBankCards, and a hidden count must not be read as a real one. Every
+        caller treats "unknown" as a full bank, which is right nearly always;
+        reading a masked zero as a genuine zero would instead withdraw every
+        bank trade from the advice and never say why.
+        """
+        bank = self.state.get("bankState") or {}
+        if bank.get("hideBankCards"):
+            return {}
+        cards = bank.get("resourceCards") or {}
         return {P.CARD[int(k)]: v for k, v in cards.items() if int(k) in P.CARD}
 
     def discard_limit(self) -> int:

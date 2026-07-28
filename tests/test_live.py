@@ -655,3 +655,29 @@ def test_sweetening_cannot_spend_cards_the_build_needs():
     assert _choose_partner(mem, cands, "sheep", "wood", 1, {"sheep": 1}) is None
     pick = _choose_partner(mem, cands, "sheep", "wood", 1, {"sheep": 2})
     assert pick["give_n"] == 2 and pick["sweetened"]
+
+
+def test_a_hidden_bank_is_unknown_not_empty():
+    """colonist can hide the bank's counts; a masked pile is not an empty one.
+
+    Read literally, a hidden bank withdraws every bank trade from the advice
+    and gives no reason. Unknown means the callers assume it is stocked, which
+    is right nearly always.
+    """
+    from app.live.engine import GameEngine
+
+    eng = GameEngine()
+    eng.state = {"bankState": {"hideBankCards": False,
+                               "resourceCards": {"1": 18, "2": 19, "3": 3}}}
+    assert eng.bank_stock() == {"wood": 18, "brick": 19, "sheep": 3}
+
+    eng.state = {"bankState": {"hideBankCards": True, "resourceCards": {"1": 0, "2": 0}}}
+    assert eng.bank_stock() == {}, "hidden counts must not be believed"
+
+
+def test_bank_trades_survive_a_hidden_bank():
+    from app.live.advisor import bank_options
+
+    cfg = _one_settlement({"sheep": 5, "wheat": 1})
+    cfg.bank = None  # what a hidden bank projects to
+    assert bank_options(_Table(), cfg), "an unknown bank must not block trading"
