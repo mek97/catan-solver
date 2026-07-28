@@ -184,6 +184,17 @@ def to_state(cfg):
         if not progressed:
             break                 # whatever is left cannot be reached from here
 
+    # A freshly built State is at the opening, where settlements are free and
+    # cost nothing to reach. Left that way its "legal moves" are 54 free
+    # placements and any engine asked about them answers BUILD_SETTLEMENT, in
+    # every position, however empty the hand -- a comparison that looks like it
+    # ran and means nothing.
+    if cfg.phase == "main":
+        from catanatron.state import ActionPrompt
+
+        state.is_initial_build_phase = False
+        state.current_prompt = ActionPrompt.PLAY_TURN
+
     _fill_players(state, cfg, seats)
     # Their longest-road length is cached in player_state and maintained by
     # their state-level build path, which building through the board bypasses.
@@ -227,6 +238,10 @@ def _fill_players(state, cfg, seats) -> None:
         state.player_state[f"{key}_YEAR_OF_PLENTY_IN_HAND"] = dev.year_of_plenty if dev else 0
         state.player_state[f"{key}_MONOPOLY_IN_HAND"] = dev.monopoly if dev else 0
         state.player_state[f"{key}_VICTORY_POINT_IN_HAND"] = dev.vp if dev else 0
+        # whether this player has already rolled: ours says so through the
+        # pending state, and without it their engine offers only ROLL
+        if mine:
+            state.player_state[f"{key}_HAS_ROLLED"] = cfg.pending != "roll"
         state.player_state[f"{key}_PLAYED_KNIGHT"] = p.knights_played
         state.player_state[f"{key}_HAS_ARMY"] = p.largest_army
         state.player_state[f"{key}_HAS_ROAD"] = p.longest_road
@@ -235,6 +250,62 @@ def _fill_players(state, cfg, seats) -> None:
         state.player_state[f"{key}_ACTUAL_VICTORY_POINTS"] = (
             max(vp, p.vp_visible) + (dev.vp if dev else 0)
         )
+
+
+def _playable_actions(state):
+    """Their legal-move generator, wherever this version keeps it.
+
+    It moved between catanatron.state and catanatron.models.actions, and the
+    published package and the source tree are on opposite sides of that. The
+    strong players only exist in the latter, so both have to work.
+    """
+    try:
+        from catanatron.models.actions import generate_playable_actions
+    except ImportError:
+        from catanatron.state import generate_playable_actions
+    return generate_playable_actions(state)
+
+
+def best_action(cfg, player=None, depth: int = 3):
+    """What a searching engine would play in this position.
+
+    Defaults to alpha-beta over their tuned value function, which measured at a
+    median of 9ms and a worst case under half a second -- comfortably inside a
+    turn timer, and the reason MCTS is not the default despite being the
+    better-known name: at a hundred simulations it is both slower and weaker.
+    """
+    from catanatron import Game
+
+    why = supported(cfg)
+    if why:
+        raise ValueError(why)
+
+    state = to_state(cfg)
+    me = COLOR_OUT[cfg.me.color]
+    # Only the index: current_color is a method in some versions and an
+    # attribute in others, and assigning it shadows the method where it is one.
+    state.current_player_index = list(state.colors).index(me)
+    if not callable(getattr(state, "current_color", None)):
+        state.current_color = me
+
+    if player is None:
+        from catanatron.players.minimax import AlphaBetaPlayer
+
+        player = AlphaBetaPlayer(me, depth, True)
+
+    # A fully-built Game, with our position swapped in. Constructing an empty
+    # shell and adding attributes as each one is missed chases a moving target:
+    # seed, playable_actions and the rest differ between versions, and the
+    # searcher reaches for all of them.
+    from catanatron.models.player import Player as _P
+
+    game = Game([_P(c) for c in state.colors], catan_map=state.board.map)
+    game.state = state
+    actions = _playable_actions(state)
+    game.state.playable_actions = actions
+    if hasattr(game, "playable_actions"):
+        game.playable_actions = actions
+    return player.decide(game, actions), actions
 
 
 def verify(cfg) -> dict[str, Any]:
