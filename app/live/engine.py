@@ -12,7 +12,7 @@ import time
 from collections import Counter
 from typing import Any, Optional
 
-from .. import board
+from .. import board, rules
 from ..models import BoardConfig, DevCards, HexTile, MyState, PlayerState, Port
 from . import protocol as P
 from .trades import TradeMemory
@@ -64,6 +64,20 @@ class GameEngine:
         self.state = payload["gameState"]
         self.my_color_id = payload.get("playerColor")
         self.play_order = payload.get("playOrder", [])
+
+        # The shape of the board comes from the board, not from an assumption:
+        # a 5-6 player game is 30 hexes, and colonist ships others besides.
+        # This has to happen before the id maps are built, since those are
+        # keyed by the geometry.
+        ms = self.state.get("mapState") or {}
+        coords = [
+            (h["x"], h["y"])
+            for h in (ms.get("tileHexStates") or {}).values()
+            if isinstance(h, dict) and "x" in h and "y" in h
+        ]
+        if coords:
+            board.use(board.for_coords(coords))
+            rules.use(rules.for_board(len(coords)))
         self.maps = P.build_maps(self.state.get("mapState", {}))
 
         # A resync mid-game re-sends the whole snapshot, and that is exactly
@@ -396,7 +410,7 @@ class GameEngine:
 
     def board_config(self) -> BoardConfig:
         ms = self.state.get("mapState") or {}
-        hexes = [HexTile(resource="desert", number=None) for _ in range(19)]
+        hexes = [HexTile(resource="desert", number=None) for _ in board.HEXES]
         for hid, h in (ms.get("tileHexStates") or {}).items():
             cid = self.maps["hexes"].get(str(hid))
             if cid is None:
@@ -407,7 +421,25 @@ class GameEngine:
                 resource=res, number=None if res == "desert" else num
             )
 
-        players: dict[str, PlayerState] = {c: PlayerState() for c in P.PALETTE}
+        # Seats, not colours. The palette is every colour the game *can* deal,
+        # and filling one player per palette entry told the rest of the app
+        # that a three-player game had four players -- a 33% error in the
+        # production rate, which divides by how many rolls happen before your
+        # turn comes round again. playOrder is the authority on who is here.
+        seats = [c for c in (P.map_color(i) for i in self.play_order) if c]
+        if not seats:
+            seats = [
+                c
+                for c in (
+                    P.map_color(int(i))
+                    for i in (self.state.get("playerStates") or {})
+                    if str(i).isdigit()
+                )
+                if c
+            ]
+        players: dict[str, PlayerState] = {
+            c: PlayerState() for c in (seats or P.PALETTE[:4])
+        }
         for cid_, c in (ms.get("tileCornerStates") or {}).items():
             if not isinstance(c, dict) or not c.get("owner"):
                 continue
@@ -417,22 +449,25 @@ class GameEngine:
             color = P.map_color(c["owner"])
             if not color:
                 continue
+            seat = players.setdefault(color, PlayerState())
             if c.get("buildingType") == 2:
-                players[color].cities.append(vid)
+                seat.cities.append(vid)
             else:
-                players[color].settlements.append(vid)
+                seat.settlements.append(vid)
         for eid, e in (ms.get("tileEdgeStates") or {}).items():
             if not isinstance(e, dict) or not e.get("owner"):
                 continue
             ceid = self.maps["edges"].get(str(eid))
             color = P.map_color(e["owner"])
             if ceid is not None and color:
-                players[color].roads.append(ceid)
+                players.setdefault(color, PlayerState()).roads.append(ceid)
 
         for cid, ps in (self.state.get("playerStates") or {}).items():
             color = P.map_color(int(cid)) if str(cid).isdigit() else None
             if not color:
                 continue
+            # playerStates is also authoritative on who is in the game
+            players.setdefault(color, PlayerState())
             vps = ps.get("victoryPointsState") or {}
             players[color].vp_visible = sum(v for v in vps.values() if isinstance(v, int))
             players[color].resource_count = len(

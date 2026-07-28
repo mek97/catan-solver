@@ -12,12 +12,9 @@ RESOURCES = rules.RESOURCES
 
 Resource = Literal["wood", "brick", "sheep", "wheat", "ore"]
 HexResource = Literal["wood", "brick", "sheep", "wheat", "ore", "desert"]
-Color = Literal["red", "blue", "orange", "green"]
+# five and six player games need more than the base four
+Color = Literal["red", "blue", "orange", "green", "white", "brown"]
 PortType = Literal["3:1", "wood", "brick", "sheep", "wheat", "ore"]
-
-# base-game distributions, used for soft warnings only
-STANDARD_TOKENS = Counter(rules.TOKEN_DISTRIBUTION)
-STANDARD_RESOURCES = Counter(rules.TILE_DISTRIBUTION)
 
 
 class HexTile(BaseModel):
@@ -90,9 +87,12 @@ class BoardConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> "BoardConfig":
-        if len(self.hexes) != 19:
-            raise ValueError(f"expected 19 hexes, got {len(self.hexes)}")
-        if not 0 <= self.robber_hex < 19:
+        # the board's size selects the geometry, rather than being checked
+        # against one: 19 is the base game, 30 the 5-6 player extension, and
+        # colonist serves shapes we have not seen
+        board.use(board.for_coords_of_size(len(self.hexes)))
+        rules.use(rules.for_board(len(self.hexes)))
+        if not 0 <= self.robber_hex < len(self.hexes):
             raise ValueError(f"robber_hex {self.robber_hex} out of range")
         for tile in self.hexes:
             if tile.resource != "desert" and tile.number is not None:
@@ -109,20 +109,20 @@ class BoardConfig(BaseModel):
                     or len(p.roads) > limits["road"]):
                 raise ValueError(f"{color} exceeds piece limits")
             for v in p.settlements + p.cities:
-                if not 0 <= v < 54:
+                if not 0 <= v < len(board.VERTICES):
                     raise ValueError(f"vertex id {v} out of range")
                 if v in seen_v:
                     raise ValueError(f"vertex {v} occupied twice ({seen_v[v]} and {color})")
                 seen_v[v] = color
             for e in p.roads:
-                if not 0 <= e < 72:
+                if not 0 <= e < len(board.EDGE_VERTICES):
                     raise ValueError(f"edge id {e} out of range")
                 if e in seen_e:
                     raise ValueError(f"edge {e} occupied twice ({seen_e[e]} and {color})")
                 seen_e[e] = color
         for port in self.ports:
             for v in port.vertices:
-                if not 0 <= v < 54:
+                if not 0 <= v < len(board.VERTICES):
                     raise ValueError(f"port vertex {v} out of range")
         return self
 
@@ -163,15 +163,19 @@ class ScoredMove(BaseModel):
 def config_warnings(cfg: BoardConfig) -> list[str]:
     """Soft sanity checks -- never block solving (a half-corrected parse must stay editable)."""
     warnings: list[str] = []
+    variant = rules.for_board(len(cfg.hexes))
     resources = Counter(t.resource for t in cfg.hexes)
-    if resources != STANDARD_RESOURCES:
-        diff = {r: resources.get(r, 0) for r in STANDARD_RESOURCES if resources.get(r, 0) != STANDARD_RESOURCES[r]}
+    expected_res = Counter(variant.TILE_DISTRIBUTION)
+    if resources != expected_res:
+        diff = {r: resources.get(r, 0) for r in expected_res if resources.get(r, 0) != expected_res[r]}
         warnings.append(f"resource mix differs from a standard board: {diff}")
     tokens = Counter(t.number for t in cfg.hexes if t.number is not None)
-    if tokens != STANDARD_TOKENS:
+    if tokens != Counter(variant.TOKEN_DISTRIBUTION):
         warnings.append("number tokens differ from the standard distribution")
-    if cfg.ports and len(cfg.ports) != 9:
-        warnings.append(f"{len(cfg.ports)} ports configured (a standard board has 9)")
+    if cfg.ports and len(cfg.ports) != variant.PORT_COUNT:
+        warnings.append(
+            f"{len(cfg.ports)} ports configured (this board should have {variant.PORT_COUNT})"
+        )
     occupied = {
         v for p in cfg.players.values() for v in p.settlements + p.cities
     }

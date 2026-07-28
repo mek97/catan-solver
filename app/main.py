@@ -81,6 +81,12 @@ def _geometry_payload() -> dict:
                 "my": round(my, 2),
             }
         )
+    # The board carries its own frame. A 30-hex extension board is taller and
+    # wider than the base 19, and a viewBox fixed in the markup would crop it.
+    pad = board.SIZE * 1.6
+    xs = [x for x, _ in board.VERTEX_PIXEL]
+    ys = [y for _, y in board.VERTEX_PIXEL]
+    x0, y0 = min(xs) - pad, min(ys) - pad
     return {
         "size": board.SIZE,
         "hexes": hexes,
@@ -89,10 +95,25 @@ def _geometry_payload() -> dict:
         "coastal_edges": board.COASTAL_EDGES,
         "row_offsets": board.ROW_OFFSETS,
         "row_sizes": board.ROW_SIZES,
+        "hex_count": len(board.HEXES),
+        "view_box": (
+            f"{x0:.0f} {y0:.0f} {max(xs) - min(xs) + 2 * pad:.0f} "
+            f"{max(ys) - min(ys) + 2 * pad:.0f}"
+        ),
     }
 
 
-GEOMETRY = _geometry_payload()
+# One payload per board shape, built on first sight. Geometry is fixed for a
+# given layout but the layout is not fixed for the session: opening a 5-6
+# player game swaps it, and the frontend has to be told about the new corners.
+_GEOMETRY: dict[int, dict] = {}
+
+
+def _geometry() -> dict:
+    key = id(board.ACTIVE)
+    if key not in _GEOMETRY:
+        _GEOMETRY[key] = _geometry_payload()
+    return _GEOMETRY[key]
 
 
 def _default_config() -> BoardConfig:
@@ -106,7 +127,7 @@ def index() -> FileResponse:
 
 @app.get("/api/geometry")
 def geometry() -> dict:
-    return GEOMETRY
+    return _geometry()
 
 
 @app.get("/api/config")

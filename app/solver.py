@@ -389,7 +389,7 @@ def _legal_road_edges(ctx: Ctx, roads: set[int] | None = None) -> list[int]:
     for e in roads:
         endpoints.update(board.EDGE_VERTICES[e])
     legal = []
-    for eid in range(72):
+    for eid in range(len(board.EDGE_VERTICES)):
         if eid in ctx.all_roads or eid in roads:
             continue
         ok = False
@@ -449,7 +449,7 @@ def _robber_moves(ctx: Ctx, step_type: str = "move_robber") -> list[ScoredMove]:
     me = cfg.me.color
     mean_opp = (sum(ctx.opp_vp.values()) / len(ctx.opp_vp)) if ctx.opp_vp else 0.0
     moves = []
-    for hid in range(19):
+    for hid in range(len(cfg.hexes)):
         if hid == cfg.robber_hex:
             continue
         tile = cfg.hexes[hid]
@@ -499,7 +499,7 @@ def _best_builds(ctx: Ctx, hand: dict[str, int]) -> list[ScoredMove]:
     cfg = ctx.cfg
     my_p = cfg.players[cfg.me.color]
     if _afford(hand, COSTS["settlement"]) and _pieces_left(my_p, "settlement") > 0:
-        for vid in range(54):
+        for vid in range(len(board.VERTICES)):
             if board.is_vertex_placeable(vid, ctx.occupied) and vid in ctx.my_road_endpoints:
                 out.append(_settlement_move(ctx, vid))
     if _afford(hand, COSTS["city"]) and _pieces_left(my_p, "city") > 0:
@@ -835,7 +835,7 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
                 first_numbers.add(cfg.hexes[h].number)
     moves = []
     overlap_penalties: list[float] = []
-    for vid in range(54):
+    for vid in range(len(board.VERTICES)):
         if not board.is_vertex_placeable(vid, ctx.occupied):
             continue
         prod = vertex_prod(ctx, vid)

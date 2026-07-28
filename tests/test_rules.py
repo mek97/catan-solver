@@ -7,19 +7,41 @@ from app import board, rules, solver
 from app.models import BoardConfig
 
 
-def test_board_matches_the_base_game():
-    assert (board.HEXES, len(board.VERTICES), len(board.EDGE_VERTICES)) == (
-        board.HEXES, rules.VERTEX_COUNT, rules.EDGE_COUNT)
-    assert len(board.HEXES) == rules.HEX_COUNT
-    assert sum(rules.TILE_DISTRIBUTION.values()) == rules.HEX_COUNT
-    assert sum(rules.TOKEN_DISTRIBUTION.values()) == rules.HEX_COUNT - 1  # desert has none
-    assert 7 not in rules.TOKEN_DISTRIBUTION
+@pytest.mark.parametrize("variant", [rules.BASE, rules.EXTENDED])
+def test_every_variant_is_internally_consistent(variant):
+    """Tiles, tokens and deserts have to agree with the board they describe."""
+    deserts = variant.TILE_DISTRIBUTION["desert"]
+    assert sum(variant.TILE_DISTRIBUTION.values()) == variant.HEX_COUNT
+    assert sum(variant.TOKEN_DISTRIBUTION.values()) == variant.HEX_COUNT - deserts
+    assert 7 not in variant.TOKEN_DISTRIBUTION
+    assert board.for_coords_of_size(variant.HEX_COUNT).counts[0] == variant.HEX_COUNT
+
+
+def test_the_base_board_is_the_standard_19():
+    assert board.BASE.counts == (19, 54, 72)
+    assert rules.BASE.HEX_COUNT == 19
+
+
+def test_the_extension_is_thirty_hexes_not_a_bigger_hexagon():
+    """Radius 3 would be 37 tiles; the 5-6 player board is a stretched 30."""
+    assert board.EXTENDED.counts[0] == 30
+    assert board.EXTENDED.ROW_SIZES == [3, 4, 5, 6, 5, 4, 3]
+    assert len(board.hexagon(3)) == 37
 
 
 def test_dev_deck_is_the_standard_25():
-    assert rules.DEV_DECK_SIZE == 25
-    assert rules.DEV_DECK["knight"] == 14 and rules.DEV_DECK["victory_point"] == 5
+    assert rules.BASE.DEV_DECK_SIZE == 25
+    assert rules.BASE.DEV_DECK["knight"] == 14 and rules.BASE.DEV_DECK["victory_point"] == 5
     assert sum(rules.dev_card_odds().values()) == pytest.approx(1.0)
+
+
+def test_the_extension_deepens_the_deck_but_not_the_points():
+    """Nine more cards, six of them knights -- a point card gets rarer."""
+    assert rules.EXTENDED.DEV_DECK_SIZE == 34
+    assert rules.EXTENDED.DEV_DECK["victory_point"] == rules.BASE.DEV_DECK["victory_point"]
+    base_odds = rules.BASE.DEV_DECK["victory_point"] / rules.BASE.DEV_DECK_SIZE
+    ext_odds = rules.EXTENDED.DEV_DECK["victory_point"] / rules.EXTENDED.DEV_DECK_SIZE
+    assert ext_odds < base_odds
 
 
 def test_costs_are_the_base_game_costs():

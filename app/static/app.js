@@ -659,6 +659,19 @@ function setLive(cls, text) {
   $("#live-text").textContent = text;
 }
 
+async function ensureGeometry(hexCount) {
+  if (!hexCount || state.geometry?.hex_count === hexCount) return;
+  await loadGeometry();
+}
+
+async function loadGeometry() {
+  await loadGeometry();
+  if (state.geometry.view_box) {
+    $("#board").setAttribute("viewBox", state.geometry.view_box);
+  }
+}
+
+
 async function poll() {
   try {
     const status = await getJSON("/api/live/status");
@@ -678,6 +691,9 @@ async function poll() {
     ]);
     state.config = st.config;
     state.rec = rec;
+    // A 5-6 player game is a different board, not a bigger one, and the swap
+    // can happen mid-session. Re-fetch the corners before drawing on them.
+    await ensureGeometry(st.config?.hexes?.length);
     renderBoard();
     renderPanel(rec);
     renderLog(log.events);
@@ -721,7 +737,7 @@ async function openUrl(ev) {
 async function init() {
   $("#live-toggle").addEventListener("click", toggle);
   $("#open-bar").addEventListener("submit", openUrl);
-  state.geometry = await getJSON("/api/geometry");
+  await loadGeometry();
   await fetch("/api/live/start", { method: "POST" });
   poll();
   state.timer = setInterval(poll, 2000);

@@ -25,12 +25,14 @@ from .. import board
 
 RESOURCE = {0: "desert", 1: "wood", 2: "brick", 3: "sheep", 4: "wheat", 5: "ore"}
 CARD = {1: "wood", 2: "brick", 3: "sheep", 4: "wheat", 5: "ore"}
-# colonist player colors. Ids 1-4 are the standard palette, confirmed from the
-# lobby's availableColors ["red","blue","orange","green"]. Other ids appear in
-# tutorial//special modes; map_color() folds them into the four we model so an
-# odd id can never break BoardConfig validation.
-COLOR = {1: "red", 2: "blue", 3: "orange", 4: "green"}
-PALETTE = ["red", "blue", "orange", "green"]
+# colonist player colors. Ids 1-4 are confirmed from the lobby's
+# availableColors ["red","blue","orange","green"]. A 5-6 player game needs two
+# more; those ids are NOT confirmed against captured traffic, so they are named
+# provisionally and will be corrected from the first recorded game that uses
+# them -- guessing an enum is how the dev-card table came to be wrong.
+# Whatever the names turn out to be, the count is what the solver needs.
+COLOR = {1: "red", 2: "blue", 3: "orange", 4: "green", 5: "white", 6: "brown"}
+PALETTE = ["red", "blue", "orange", "green", "white", "brown"]
 
 
 def map_color(color_id: Any) -> Optional[str]:
@@ -246,23 +248,30 @@ def describe_log(entry: dict) -> Optional[dict]:
     return ev
 
 
-# Import-time sanity: every one of our 72 edges must be reachable, and the
-# mapping must be injective. The scan runs over a radius-3 hex range because
-# colonist names outer-ring edges after hexes that lie *outside* the 19-hex
-# board (the 19 board hexes alone only own 19*3 = 57 edges).
+# Import-time sanity: every edge of every board we ship must be reachable, and
+# the mapping must be injective. The scan runs wider than the board because
+# colonist names outer-ring edges after hexes that lie *outside* it (the 19
+# board hexes alone own only 19*3 = 57 of the 72 edges).
 def _self_check() -> None:
-    seen: dict[int, tuple] = {}
-    for q in range(-3, 4):
-        for r in range(-3, 4):
-            for z in (0, 1, 2):
-                e = edge_to_canonical({"x": q, "y": r, "z": z})
-                if e is None:
-                    continue
-                assert e not in seen or seen[e] == (q, r, z), (
-                    f"edge {e} claimed by {seen[e]} and {(q, r, z)}"
-                )
-                seen[e] = (q, r, z)
-    assert len(seen) == 72, f"edge mapping covers {len(seen)}/72 edges"
+    for layout in (board.BASE, board.EXTENDED):
+        board.use(layout)
+        reach = max(abs(c) for h in layout.HEXES for c in h) + 2
+        seen: dict[int, tuple] = {}
+        for q in range(-reach, reach + 1):
+            for r in range(-reach, reach + 1):
+                for z in (0, 1, 2):
+                    e = edge_to_canonical({"x": q, "y": r, "z": z})
+                    if e is None:
+                        continue
+                    assert e not in seen or seen[e] == (q, r, z), (
+                        f"edge {e} claimed by {seen[e]} and {(q, r, z)}"
+                    )
+                    seen[e] = (q, r, z)
+        expected = len(layout.EDGE_VERTICES)
+        assert len(seen) == expected, (
+            f"{layout}: edge mapping covers {len(seen)}/{expected} edges"
+        )
+    board.use(board.BASE)
 
 
 _self_check()
