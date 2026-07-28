@@ -725,3 +725,39 @@ def test_the_events_we_cannot_read_are_not_pretended_to_be_read():
         "kind": "card_stolen_blind", "thief": "blue", "victim": "green", "count": 1}
     unknown = P.describe_log({"text": {"type": 999}})
     assert unknown["kind"] == "log_999", "an unknown type stays visibly unknown"
+
+
+def test_a_snapshot_brings_history_with_it():
+    """colonist hands over the whole log when the socket opens, and we used to
+    read none of it: attaching mid-game started the dice chart at zero and gave
+    the card tracker nothing to reason from."""
+    src = replay()
+    payload = {
+        "gameState": {**src.state, "gameLogState": {
+            "1": {"text": {"type": 10, "playerColor": 1, "firstDice": 3, "secondDice": 4}},
+            "2": {"text": {"type": 44, "playerColor": 1}},
+        }},
+        "playerColor": src.my_color_id,
+        "playOrder": src.play_order,
+        "playerUserStates": [],
+    }
+    eng = GameEngine()
+    assert eng.apply_snapshot(payload)
+    kinds = [e["kind"] for e in eng.events]
+    assert "dice_rolled" in kinds and "turn_ended" in kinds
+    assert eng.dice_history() == [7]
+
+
+def test_re_reading_the_same_log_does_not_double_count():
+    """A resync re-sends everything; it must not arrive twice."""
+    src = replay()
+    payload = {
+        "gameState": {**src.state, "gameLogState": {
+            "1": {"text": {"type": 10, "playerColor": 1, "firstDice": 2, "secondDice": 2}},
+        }},
+        "playerColor": src.my_color_id, "playOrder": src.play_order, "playerUserStates": [],
+    }
+    eng = GameEngine()
+    eng.apply_snapshot(payload)
+    eng.apply_snapshot(payload)
+    assert eng.dice_history() == [4]

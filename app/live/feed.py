@@ -133,6 +133,12 @@ class LiveFeed:
 
         if is_snapshot:
             self.store.add_snapshot(self.game_id, self.engine.applied, self.engine.state)
+            # the log the snapshot arrived with is history we did not witness
+            for ev in self.engine.events:
+                self.store.add_event(
+                    self.game_id, ev.get("log_id"), frame_id,
+                    ev.get("kind", "?"), ev.get("color"), ev,
+                )
             self._orphan_diffs = 0
             self.resyncing = False
             return

@@ -72,6 +72,10 @@ CREATE INDEX IF NOT EXISTS snapshots_game ON snapshots(game_id, id);
 """
 
 
+_ROBBER_KINDS = {"robber_moved", "robber_placed"}
+_STEAL_KINDS = {"card_stolen", "card_stolen_blind"}
+
+
 class Store:
     """Thread-safe SQLite store. One instance per process is fine."""
 
@@ -172,17 +176,34 @@ class Store:
         return out
 
     def gaps(self, game_id: str) -> list[int]:
-        """Missing colonist log ids — non-empty means we dropped events."""
+        """Log ids we never accounted for -- a sign we actually lost events.
+
+        Not every missing id is a loss. colonist numbers entries it never sends
+        us: the private half of a steal, which the thief and victim can read and
+        a spectator cannot. Those show up as a two-id hole sitting between a
+        robber move and the steal it caused, every time, and they made up the
+        large majority of what this used to report -- so the warning fired
+        constantly while nothing was wrong, which is worse than not warning.
+        """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT log_id FROM events WHERE game_id=? AND log_id IS NOT NULL"
+                "SELECT log_id, kind FROM events WHERE game_id=? AND log_id IS NOT NULL"
                 " ORDER BY log_id",
                 (game_id,),
             ).fetchall()
-        ids = [r["log_id"] for r in rows]
-        if len(ids) < 2:
+        seen = [(r["log_id"], r["kind"]) for r in rows]
+        if len(seen) < 2:
             return []
-        return sorted(set(range(ids[0], ids[-1] + 1)) - set(ids))
+        ids = {i for i, _k in seen}
+        missing = sorted(set(range(seen[0][0], seen[-1][0] + 1)) - ids)
+        if not missing:
+            return []
+        # a hole bracketed by a robber move and a steal is the withheld card
+        private: set[int] = set()
+        for (a, ka), (b, kb) in zip(seen, seen[1:]):
+            if b - a > 1 and ka in _ROBBER_KINDS and kb in _STEAL_KINDS:
+                private.update(range(a + 1, b))
+        return [i for i in missing if i not in private]
 
     def latest_snapshot(self, game_id: str) -> Optional[dict]:
         with self._lock:

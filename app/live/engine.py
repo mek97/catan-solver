@@ -90,26 +90,38 @@ class GameEngine:
         self.trade_memory.observe(
             self.state.get("tradeState") or {}, self.my_color_id, P.map_color
         )
+        # A snapshot carries the whole game log, and we used to read none of
+        # it: every roll, trade and steal before we attached was handed over
+        # and dropped. The dice chart started at zero, the card tracker had no
+        # history to reason from, and re-attaching mid-game quietly threw away
+        # what it already knew. The seen-set makes a resync idempotent.
+        self.events.extend(self._read_log(self.state.get("gameLogState") or {}))
+        self.events.sort(key=lambda e: e.get("log_id", 0))
         self.applied = 1
         return True
 
-    def apply_diff(self, diff: dict) -> list[dict]:
-        """Merge one diff; returns the semantic events it contained."""
-        if not self.state:
-            return []
-        new_events = []
-        for log_id, entry in (diff.get("gameLogState") or {}).items():
+    def _read_log(self, log: dict) -> list[dict]:
+        """Turn colonist log entries into events, skipping any already seen."""
+        out = []
+        for log_id, entry in log.items():
             try:
                 lid = int(log_id)
             except (TypeError, ValueError):
                 continue
-            if lid in self._seen_log_ids:
+            if lid in self._seen_log_ids or not isinstance(entry, dict):
                 continue
             ev = P.describe_log(entry)
             if ev:
                 ev["log_id"] = lid
                 self._seen_log_ids.add(lid)
-                new_events.append(ev)
+                out.append(ev)
+        return out
+
+    def apply_diff(self, diff: dict) -> list[dict]:
+        """Merge one diff; returns the semantic events it contained."""
+        if not self.state:
+            return []
+        new_events = self._read_log(diff.get("gameLogState") or {})
         self.state = P.deep_merge(self.state, diff)
         # Read trades from merged state, never from the diff: a diff carries
         # only the fields that changed, so a response arrives detached from the
