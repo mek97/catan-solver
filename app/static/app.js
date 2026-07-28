@@ -2,7 +2,6 @@
    Board geometry comes from /api/geometry verbatim; position, moves, and log
    come from the live colonist feed. Advisory only: nothing is ever clicked. */
 
-const COLORS = ["red", "blue", "orange", "green"];
 const PIP_DOTS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 const RES_ABBR = { wood: "🌲", brick: "🧱", sheep: "🐑", wheat: "🌾", ore: "⛰" };
 
@@ -127,9 +126,11 @@ function renderBoard() {
     ports.appendChild(badge);
   }
 
+  // Whoever the server says is in the game, not a fixed four: the 5-6 player
+  // extension seats white and brown, and a hardcoded list silently declines to
+  // draw their pieces at all.
   const owner = (kind, id) => {
-    for (const c of COLORS) {
-      const p = cfg.players[c];
+    for (const [c, p] of Object.entries(cfg.players || {})) {
       if (!p) continue;
       if (kind === "road" && p.roads.includes(id)) return c;
       if (kind === "s" && p.settlements.includes(id)) return c;

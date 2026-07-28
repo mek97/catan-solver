@@ -23,6 +23,9 @@
   --rob: #e2685f;     /* robber / danger */
 
   --red: #d94b45; --blue: #3f7ee0; --orange: #ef8b21; --green: #47a75f;
+  /* the 5-6 player extension seats two more. White is dimmed off pure so
+     it reads as a piece rather than as the board showing through. */
+  --white: #e8edf3; --brown: #9b6b43;
 
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --disp: "Chakra Petch", "Segoe UI", sans-serif;
@@ -137,9 +140,11 @@ main { display: flex; height: 100vh; }
 .piece { stroke: rgba(0,0,0,.45); stroke-width: 1.4; }
 .piece.red { fill: var(--red); } .piece.blue { fill: var(--blue); }
 .piece.orange { fill: var(--orange); } .piece.green { fill: var(--green); }
+.piece.white { fill: var(--white); } .piece.brown { fill: var(--brown); }
 .road { stroke-width: 8; stroke-linecap: round; }
 .road.red { stroke: var(--red); } .road.blue { stroke: var(--blue); }
 .road.orange { stroke: var(--orange); } .road.green { stroke: var(--green); }
+.road.white { stroke: var(--white); } .road.brown { stroke: var(--brown); }
 .road-shadow { stroke: rgba(0,0,0,.35); stroke-width: 11; stroke-linecap: round; }
 
 /* move hints */
@@ -147,6 +152,7 @@ main { display: flex; height: 100vh; }
 .hint .ghost { opacity: .62; animation: pulse 1.3s ease-in-out infinite; }
 .hint .ghost.red { fill: var(--red); } .hint .ghost.blue { fill: var(--blue); }
 .hint .ghost.orange { fill: var(--orange); } .hint .ghost.green { fill: var(--green); }
+.hint .ghost.white { fill: var(--white); } .hint .ghost.brown { fill: var(--brown); }
 .hint .ghost-outline {
   fill: none; stroke: var(--place); stroke-width: 2.5; stroke-dasharray: 4 3;
   animation: pulse 1.3s ease-in-out infinite;
@@ -154,6 +160,7 @@ main { display: flex; height: 100vh; }
 .hint .ghost-road { stroke-width: 8; stroke-linecap: round; opacity: .62; animation: pulse 1.3s ease-in-out infinite; }
 .hint .ghost-road.red { stroke: var(--red); } .hint .ghost-road.blue { stroke: var(--blue); }
 .hint .ghost-road.orange { stroke: var(--orange); } .hint .ghost-road.green { stroke: var(--green); }
+.hint .ghost-road.white { stroke: var(--white); } .hint .ghost-road.brown { stroke: var(--brown); }
 .hint .ghost-road-outline {
   stroke: var(--place); stroke-width: 11; stroke-linecap: round; fill: none;
   stroke-dasharray: 5 4; animation: pulse 1.3s ease-in-out infinite;
