@@ -295,3 +295,27 @@ def test_a_forced_robber_move_is_still_advised():
     cfg = _position()
     cfg.pending = "move_robber"
     assert robber_options(_Bought(), cfg), "the 7 does not care what you bought"
+
+
+def test_the_victim_is_named_and_is_the_dangerous_one():
+    """§3: you steal from one player adjacent to the hex -- so which one is a
+    real choice, and the card is random either way. Whose clock it comes off is
+    the part we get to pick, and picking by hand size sends the robber after
+    whoever is losing while someone two points from winning stands on the same
+    hex."""
+    cfg = _position()
+    hid = 4 if cfg.robber_hex != 4 else 5
+    corners = board.HEX_VERTICES[hid]
+    for color, v in zip(("blue", "orange", "green"), corners[::2]):
+        cfg.players[color].settlements = [v]
+    blocked = set(corners) | {n for c in corners for n in board.VERTEX_ADJ[c]}
+    cfg.players[cfg.me.color].settlements = [v for v in range(54) if v not in blocked][:1]
+    cfg.players["blue"].resource_count, cfg.players["blue"].vp_visible = 3, 8
+    cfg.players["orange"].resource_count, cfg.players["orange"].vp_visible = 9, 2
+    cfg.players["green"].resource_count, cfg.players["green"].vp_visible = 5, 4
+    cfg.pending = "move_robber"
+
+    move = next(m for m in solver.solve(cfg) if m.steps[0].robber_hex == hid)
+    assert move.steps[0].steal_from == "blue", "eight points beats nine cards"
+    assert "steal from blue" in move.location_hint, "and it has to say so"
+    assert "3 players" in move.reasoning, "say that there was a choice to make"

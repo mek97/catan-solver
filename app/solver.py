@@ -1444,8 +1444,39 @@ def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
         cost_to_them = _clamp(min(after.values()) - field, 0.0, ROBBER_CAP)
         mine = _clamp(my_base - economy.turns_to_win(nxt, build_ctx(nxt)),
                       -ROBBER_CAP, ROBBER_CAP)
-        steal = 0.35 if m.steps[0].steal_from else 0.0
-        out.append(m.model_copy(update={"score": round(cost_to_them + mine + steal, 2)}))
+
+        # Who to take from, when the hex touches more than one. Generation
+        # picks whoever holds most cards, which sends the robber after the
+        # player in last place while somebody two points from winning is
+        # standing on the same hex. The card is random either way; whose clock
+        # it comes off is the part we get to choose.
+        on_hex = [
+            c for c in others
+            if any(hid in board.VERTEX_HEXES[v]
+                   for v in cfg.players[c].settlements + cfg.players[c].cities)
+            and cfg.players[c].resource_count > 0
+        ]
+        victim = min(
+            on_hex, key=lambda c: (baseline[c], -cfg.players[c].resource_count), default=None
+        )
+        steal = 0.35 if victim else 0.0
+        hint, why = m.location_hint, m.reasoning
+        if victim and victim != m.steps[0].steal_from:
+            hint = hint.split(" and steal from ")[0] + f" and steal from {victim}"
+            why = why.split("; steal from ")[0] + (
+                f"; steal from {victim} — {cfg.players[victim].resource_count} cards and "
+                f"the closest to winning of the {len(on_hex)} players on it."
+            )
+        elif victim and len(on_hex) > 1:
+            why += f" ({len(on_hex)} players sit on this hex; {victim} is the most dangerous.)"
+
+        step = m.steps[0].model_copy(update={"steal_from": victim})
+        out.append(m.model_copy(update={
+            "steps": [step] + list(m.steps[1:]),
+            "score": round(cost_to_them + mine + steal, 2),
+            "location_hint": hint,
+            "reasoning": why,
+        }))
     out.sort(key=lambda m: -m.score)
     return out
 
