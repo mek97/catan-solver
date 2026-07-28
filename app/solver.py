@@ -672,7 +672,7 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                 best_ev, best_r = ev, r
         if best_r:
             score = 0.8 * best_ev
-            gained = round(best_ev)
+            gained = int(round(best_ev))
             hand2 = dict(ctx.hand)
             hand2[best_r] = hand2.get(best_r, 0) + gained
             enabled = [
@@ -685,7 +685,15 @@ def _dev_plays(ctx: Ctx) -> list[ScoredMove]:
                 note = f" That haul likely funds: {b.location_hint}."
             out.append(
                 ScoredMove(
-                    steps=[MoveStep(type="play_monopoly", resource=best_r)],
+                    steps=[MoveStep(
+                        type="play_monopoly",
+                        resource=best_r,
+                        # the haul goes in `get` as well as `resource`: the
+                        # name is what the player types into colonist, but
+                        # without the cards attached the evaluation applies a
+                        # move that changes nothing and prices it at zero
+                        get={best_r: gained} if gained else None,
+                    )],
                     score=score,
                     reasoning=f"Monopoly on {best_r}: expect roughly {best_ev:.1f} cards from opponents.{note}",
                     location_hint=f"play Monopoly and name {best_r}",
@@ -1096,6 +1104,7 @@ def _after(cfg: BoardConfig, steps: list[MoveStep]) -> BoardConfig:
             me.dev_card_count += 1
         elif s.type == "play_road_building":
             me.roads.extend(s.edges or [])
+            nxt.me.dev_cards.road_building = max(0, nxt.me.dev_cards.road_building - 1)
         elif s.type == "play_knight":
             me.knights_played += 1
             nxt.me.dev_cards.knight = max(0, nxt.me.dev_cards.knight - 1)
@@ -1109,6 +1118,10 @@ def _after(cfg: BoardConfig, steps: list[MoveStep]) -> BoardConfig:
                 hand[r] = hand.get(r, 0) - n
             for r, n in (s.get or {}).items():
                 hand[r] = hand.get(r, 0) + n
+            if s.type == "play_year_of_plenty":
+                nxt.me.dev_cards.year_of_plenty = max(0, nxt.me.dev_cards.year_of_plenty - 1)
+            elif s.type == "play_monopoly":
+                nxt.me.dev_cards.monopoly = max(0, nxt.me.dev_cards.monopoly - 1)
 
     nxt.me.hand = {r: max(0, n) for r, n in hand.items()}
     if any(s.type in ("build_road", "setup_road", "play_road_building") for s in steps):

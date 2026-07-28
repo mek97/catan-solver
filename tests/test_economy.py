@@ -445,3 +445,27 @@ def test_the_robber_is_priced_against_the_front_runner_not_the_whole_table():
     assert best.steps[0].robber_hex in board.VERTEX_HEXES[
         cfg.players["blue"].settlements[0]
     ], "the front-runner is the one worth blocking"
+
+
+def test_free_resources_rarely_make_the_estimate_worse():
+    """Greedy planning has an artefact: extra cards can change which rung is
+    taken first and leave the total worse. It cannot be eliminated without
+    searching properly, so it is bounded and measured instead -- if this starts
+    failing, the ladder has become less stable, not more."""
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    cfg.me.hand = {r: 1 for r in rules.RESOURCES}
+    base = economy.turns_to_win(cfg, solver.build_ctx(cfg))
+
+    worse = []
+    for r in rules.RESOURCES:
+        for extra in (1, 2, 3, 4, 6):
+            richer = cfg.model_copy(deep=True)
+            richer.me.hand[r] = richer.me.hand.get(r, 0) + extra
+            got = economy.turns_to_win(richer, solver.build_ctx(richer))
+            if got > base:
+                worse.append(got - base)
+
+    assert len(worse) <= 6, f"{len(worse)}/25 probes went backwards"
+    assert max(worse, default=0) <= 3.0, "and never by more than a few turns"
