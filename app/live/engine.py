@@ -15,6 +15,27 @@ from typing import Any, Optional
 from .. import board
 from ..models import BoardConfig, DevCards, HexTile, MyState, PlayerState, Port
 from . import protocol as P
+from .trades import TradeMemory
+
+
+def _game_key(payload: dict) -> tuple:
+    """Identity of a game: who is playing, and on which board.
+
+    colonist never sends a game id, so a re-sent snapshot is otherwise
+    indistinguishable from a new game. The roster plus the tile layout is
+    stable across a reconnect and different for the next game.
+    """
+    roster = tuple(sorted(
+        (str(u.get("userId") or u.get("username")), u.get("selectedColor"))
+        for u in (payload.get("playerUserStates") or [])
+        if isinstance(u, dict)
+    ))
+    hexes = (payload.get("gameState", {}).get("mapState", {}) or {}).get("tileHexStates") or {}
+    tiles = tuple(sorted(
+        (h.get("x"), h.get("y"), h.get("type"), h.get("diceNumber"))
+        for h in hexes.values() if isinstance(h, dict)
+    ))
+    return (roster, tiles)
 
 
 class GameEngine:
@@ -25,6 +46,8 @@ class GameEngine:
         self.play_order: list[int] = []
         self.applied = 0
         self.events: list[dict] = []
+        self.trade_memory = TradeMemory()
+        self.game_key: Optional[tuple] = None
         self._seen_log_ids: set[int] = set()
 
     # --- ingest -------------------------------------------------------------
@@ -42,6 +65,17 @@ class GameEngine:
         self.my_color_id = payload.get("playerColor")
         self.play_order = payload.get("playOrder", [])
         self.maps = P.build_maps(self.state.get("mapState", {}))
+
+        # A resync mid-game re-sends the whole snapshot, and that is exactly
+        # when the trade history matters most -- so only forget it when this is
+        # demonstrably a different game.
+        key = _game_key(payload)
+        if self.game_key is not None and key != self.game_key:
+            self.trade_memory = TradeMemory()
+        self.game_key = key
+        self.trade_memory.observe(
+            self.state.get("tradeState") or {}, self.my_color_id, P.map_color
+        )
         self.applied = 1
         return True
 
@@ -63,6 +97,13 @@ class GameEngine:
                 self._seen_log_ids.add(lid)
                 new_events.append(ev)
         self.state = P.deep_merge(self.state, diff)
+        # Read trades from merged state, never from the diff: a diff carries
+        # only the fields that changed, so a response arrives detached from the
+        # offer it answers. The memory dedupes the re-reads.
+        if isinstance(diff.get("tradeState"), dict):
+            self.trade_memory.observe(
+                self.state.get("tradeState") or {}, self.my_color_id, P.map_color
+            )
         self.applied += 1
         self.events.extend(new_events)
         return new_events
@@ -172,13 +213,30 @@ class GameEngine:
         return limit if isinstance(limit, int) else 7
 
     def dev_cards_used(self) -> dict[str, int]:
-        """Knights/dev cards each player has *played* — public information."""
+        """How many dev cards each player has played — public information."""
         out: dict[str, int] = {}
         dev = (self.state.get("mechanicDevelopmentCardsState") or {}).get("players") or {}
         for cid, ps in dev.items():
             color = P.map_color(int(cid)) if str(cid).isdigit() else None
             if color:
                 out[color] = len(ps.get("developmentCardsUsed") or [])
+        return out
+
+    def knights_played(self) -> dict[str, int]:
+        """Knights each player has played — played cards are face up, so exact.
+
+        This drives Largest Army, which is worth two points, so guessing it
+        from the size of the used pile would over- or under-count anyone who
+        played a monopoly or road building.
+        """
+        out: dict[str, int] = {}
+        dev = (self.state.get("mechanicDevelopmentCardsState") or {}).get("players") or {}
+        for cid, ps in dev.items():
+            color = P.map_color(int(cid)) if str(cid).isdigit() else None
+            if not color:
+                continue
+            used = ps.get("developmentCardsUsed") or []
+            out[color] = sum(1 for c in used if P.DEV_CARD.get(c) == "knight")
         return out
 
     def my_dev_cards(self) -> dict[str, Any]:
@@ -381,6 +439,7 @@ class GameEngine:
                 (ps.get("resourceCards") or {}).get("cards") or []
             )
             players[color].pieces_left = self.pieces_left(color)
+            players[color].knights_played = self.knights_played().get(color, 0)
             players[color].longest_road_len = self.longest_roads().get(color)
         longest = (self.state.get("mechanicLongestRoadState") or {})
         for cid, v in longest.items():

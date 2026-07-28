@@ -101,37 +101,44 @@ class LiveFeed:
 
     def ingest(self, payload_b64: str, direction: str, opcode: int) -> None:
         self.last_frame_at = time.time()
+        obj = P.decode_frame(payload_b64) if opcode == 2 else None
+        data = P.envelope(obj) if obj else None
+
+        # A snapshot must settle the game id *before* its frame is stored.
+        # Storing first filed every snapshot under the previous game, so each
+        # recorded game was diffs-only and no export could be replayed.
+        is_snapshot = False
+        if data and data.get("type") == P.MSG_GAME_SNAPSHOT:
+            payload = data.get("payload") or {}
+            was = self.engine.game_key
+            # False here means a lobby message reusing type 4, not a snapshot
+            if self.engine.apply_snapshot(payload):
+                is_snapshot = True
+                if self.game_id is None or self.engine.game_key != was:
+                    self.game_id = f"{self.room_id or 'game'}-{int(time.time())}"
+                    self.store.start_game(
+                        self.game_id,
+                        self.room_id or "",
+                        self.engine.my_color,
+                        self.engine.play_order,
+                        payload.get("gameState", {}),
+                    )
+                # a resync re-sends the same game: keep one recording of it
+
         frame_id = self.store.add_frame(payload_b64, direction, opcode, self.game_id)
         if frame_id is None:  # already stored (idempotent replay)
             return
-        if opcode != 2:
-            return
-        obj = P.decode_frame(payload_b64)
-        if not obj:
-            return
-        data = P.envelope(obj)
         if not data:
+            return
+
+        if is_snapshot:
+            self.store.add_snapshot(self.game_id, self.engine.applied, self.engine.state)
+            self._orphan_diffs = 0
+            self.resyncing = False
             return
 
         if data.get("type") == P.MSG_ROOM_STATE:
             self.room_id = data.get("roomId") or self.room_id
-            return
-
-        if data.get("type") == P.MSG_GAME_SNAPSHOT:
-            payload = data.get("payload") or {}
-            if not self.engine.apply_snapshot(payload):
-                return  # a lobby message reusing type 4, not a game snapshot
-            self.game_id = f"{self.room_id or 'game'}-{int(time.time())}"
-            self.store.start_game(
-                self.game_id,
-                self.room_id or "",
-                self.engine.my_color,
-                self.engine.play_order,
-                payload.get("gameState", {}),
-            )
-            self.store.add_snapshot(self.game_id, self.engine.applied, self.engine.state)
-            self._orphan_diffs = 0
-            self.resyncing = False
             return
 
         if data.get("type") == P.MSG_GAME_DIFF and not self.engine.state:
