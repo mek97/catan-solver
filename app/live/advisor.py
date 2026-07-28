@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Optional
 
-from .. import board, solver
+from .. import board, economy, solver
 from ..models import RESOURCES, BoardConfig, ScoredMove
 from .engine import GameEngine
 
@@ -136,12 +136,23 @@ def _hand_after(cfg: BoardConfig, give: Counter, get: Counter) -> Optional[dict[
     return hand
 
 
-def _best_score(cfg: BoardConfig, hand: dict[str, int]) -> float:
+def _position_turns(cfg: BoardConfig, hand: dict[str, int]) -> float:
+    """Turns to win holding this hand. Lower is better.
+
+    The whole position, not the best move available this turn. Asking only what
+    is buildable right now scores a card you cannot yet use at exactly zero,
+    which is why every caller used to add a hand-tuned scarcity term on top --
+    and those terms then dwarfed the real numbers they were correcting. The
+    ladder already prices a card you never produce: it shortens the wait on
+    every rung that needs one.
+
+    It is also some three hundred times cheaper than solving the position,
+    which the callers were doing in a loop.
+    """
     probe = cfg.model_copy(deep=True)
-    probe.me.hand = hand  # type: ignore[assignment]
-    probe.pending = None  # score the build options, not a forced robber move
-    moves = solver.solve(probe)
-    return max((m.score for m in moves), default=0.0)
+    probe.me.hand = dict(hand)  # type: ignore[assignment]
+    probe.pending = None  # value the position, not a forced robber move
+    return economy.turns_to_win(probe, solver.build_ctx(probe))
 
 
 def evaluate_offer(eng: GameEngine, cfg: BoardConfig, offer: dict[str, Any]) -> dict[str, Any]:
@@ -166,14 +177,10 @@ def evaluate_offer(eng: GameEngine, cfg: BoardConfig, offer: dict[str, Any]) -> 
         return result
 
     ctx = solver.build_ctx(cfg)
-    before = _best_score(cfg, dict(cfg.me.hand))
-    after = _best_score(cfg, hand_after)
-    gain = after - before
-
-    # what it costs me in production terms: giving away what I rarely make hurts
-    scarcity = sum(n * (10.0 / max(1.0, ctx.my_pips.get(r, 0.0) + 1)) for r, n in give.items())
-    relief = sum(n * (10.0 / max(1.0, ctx.my_pips.get(r, 0.0) + 1)) for r, n in get.items())
-    net = gain + (relief - scarcity) * 0.35
+    # turns this trade takes off the race; what you give and what you get are
+    # both already priced by the ladder, so nothing is added on top
+    gain = _position_turns(cfg, dict(cfg.me.hand)) - _position_turns(cfg, hand_after)
+    net = gain
 
     leader_vp = max(ctx.opp_vp.values(), default=0)
     their_vp = ctx.opp_vp.get(who, 0) if who else 0
@@ -409,7 +416,7 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
             # score it the same way we score an incoming offer, so proposing a
             # trade competes with building instead of always sorting last
             after = _hand_after(cfg, Counter(offer), Counter(want))
-            gain = (_best_score(cfg, after) - _best_score(cfg, dict(hand))) if after else 0.0
+            gain = (_position_turns(cfg, dict(hand)) - _position_turns(cfg, after)) if after else 0.0
 
             why = (
                 f"they produce {pick['pips']} of it and hold {pick['cards']} cards"
@@ -460,7 +467,7 @@ def bank_options(eng: GameEngine, cfg: BoardConfig, limit: int = 4) -> list[dict
     ctx = solver.build_ctx(cfg)
     hand = cfg.me.hand
     stock = cfg.bank or {}
-    before = _best_score(cfg, dict(hand))
+    before = _position_turns(cfg, dict(hand))
     out: list[dict[str, Any]] = []
 
     for give in RESOURCES:
@@ -473,16 +480,15 @@ def bank_options(eng: GameEngine, cfg: BoardConfig, limit: int = 4) -> list[dict
             after = _hand_after(cfg, Counter({give: rate}), Counter({get: 1}))
             if after is None:
                 continue
-            gain = _best_score(cfg, after) - before
-            # even a trade that builds nothing this turn is worth something if
-            # it converts a surplus into what we never produce
-            scarcity = 1.0 / max(1.0, ctx.my_pips.get(get, 0.0) + 1)
+            # a trade that builds nothing this turn still counts: the ladder
+            # sees the surplus become something we never produce
+            gain = before - _position_turns(cfg, after)
             out.append(
                 {
                     "give": {give: rate},
                     "get": {get: 1},
                     "rate": rate,
-                    "score": round(gain + scarcity, 1),
+                    "score": round(gain, 2),
                     "text": f"trade {rate} {give} for 1 {get}"
                     + (f" ({rate}:1)" if rate != rules.BANK_RATE else ""),
                     "why": (
@@ -602,8 +608,6 @@ def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[di
 def victory_plan(eng: GameEngine, cfg: BoardConfig) -> dict[str, Any]:
     """The route to ten points, so a turn with no affordable move still says
     something. "Nothing to do" and "nothing to aim for" are different answers."""
-    from .. import economy
-
     ctx = solver.build_ctx(cfg)
     steps = []
     for s in economy.plan(cfg, ctx):

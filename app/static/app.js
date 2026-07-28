@@ -456,17 +456,34 @@ const openCats = new Set(["incoming"]);
 function renderActions(rec, groups) {
   const box = $("#actions");
   box.replaceChildren();
-  // Best category first. This only became meaningful once every score was in
-  // turns: while placements were counted in weighted pips and offers in
-  // something else, a fixed order was the only honest arrangement, because the
-  // numbers could not be compared. Empty categories keep their declared order
-  // at the bottom, so the panel still has a shape you can learn.
+  // Order: what expires, then what is worth most, then everything empty.
+  //
+  // Ranking by score only became meaningful once every score was in turns.
+  // Before that, placements were weighted pips and an incoming offer carried a
+  // hand-tuned scarcity term that could swing it by more than any real move --
+  // sorting on that would have floated Respond to the top permanently while
+  // looking like a ranking.
+  //
+  // Two things still outrank value. An offer on the table has a clock on it and
+  // is gone if ignored, which no score expresses; and scores move every poll,
+  // so a category only overtakes another by a clear margin, or the panel
+  // reshuffles under the cursor while you are reading it.
+  const STICKY = 0.5;
+  const rank = (c) => {
+    const best = groups[c.key]?.[0];
+    if (!best) return null;
+    return Math.round((best.score ?? 0) / STICKY);
+  };
   const ranked = [...CATS].sort((a, b) => {
-    const sa = groups[a.key]?.[0], sb = groups[b.key]?.[0];
-    if (!sa && !sb) return CATS.indexOf(a) - CATS.indexOf(b);
-    if (!sa) return 1;
-    if (!sb) return -1;
-    return (sb.score ?? 0) - (sa.score ?? 0);
+    const ra = rank(a), rb = rank(b);
+    if (ra === null && rb === null) return CATS.indexOf(a) - CATS.indexOf(b);
+    if (ra === null) return 1;
+    if (rb === null) return -1;
+    // an offer you can still answer comes first whatever it is worth
+    const urgent = (c) => (c.key === "incoming" ? 1 : 0);
+    if (urgent(a) !== urgent(b)) return urgent(b) - urgent(a);
+    if (ra !== rb) return rb - ra;
+    return CATS.indexOf(a) - CATS.indexOf(b);
   });
   for (const cat of ranked) {
     const items = groups[cat.key] || [];
