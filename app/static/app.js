@@ -675,7 +675,7 @@ async function ensureGeometry(hexCount) {
 }
 
 async function loadGeometry() {
-  await loadGeometry();
+  state.geometry = await getJSON("/api/geometry");
   if (state.geometry.view_box) {
     $("#board").setAttribute("viewBox", state.geometry.view_box);
   }
