@@ -38,15 +38,22 @@
           <span id="timer"></span>
         </div>
         <div id="turn-sub"></div>
-        <div id="hand-strip"></div>
       </header>
 
+      <!-- what to do, in the order it has to be decided -->
       <div id="urgent"></div>
+      <div id="offers"></div>
       <div id="primary"></div>
-      <div id="actions"></div>
       <div id="engine" class="hidden"></div>
+      <div id="actions"></div>
 
-      <details id="intel-plan" open>
+      <!-- trades, drawn as cards the way the game draws them -->
+      <details id="intel-trades" open>
+        <summary>Trades <span id="trades-sub"></span></summary>
+        <div id="trades"></div>
+      </details>
+
+      <details id="intel-plan">
         <summary>Route to 10</summary>
         <div id="plan" class="hidden"></div>
       </details>
@@ -68,6 +75,13 @@
       </div>
     </aside>
   </main>
+
+  <!-- your hand, where the game puts it -->
+  <footer id="dock">
+    <div id="dock-cards"></div>
+    <div id="dock-dev"></div>
+    <div id="dock-meta"></div>
+  </footer>
 
   <script src="/static/app.js"></script>
 </body>

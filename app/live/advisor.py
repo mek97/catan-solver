@@ -690,6 +690,10 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "phase": cfg.phase,
         "pending": cfg.pending,
         "hand": cfg.me.hand,
+        # the hand strip shows how close a 7 is to hurting, so it needs the
+        # limit as well as the cards -- it is 7 in every game we have seen but
+        # it is a variant setting, not a constant
+        "discard_limit": cfg.me.discard_limit,
         "moves": [m.model_dump() for m in moves],
         "trades": trade_advice(eng, cfg),
         "dice": dice_stats(eng),

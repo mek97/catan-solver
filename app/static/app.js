@@ -21,48 +21,139 @@ async function getJSON(url) {
   return r.json();
 }
 
-/* ---------------- hex art ---------------- */
+/* ---------------- resource art ----------------
+   One drawing per resource, in a 48x48 box, used at both sizes: painted into
+   the board hexes and stamped on the cards in your hand and in every trade.
+   Same picture in both places is the point -- the card you are being offered
+   should be recognisably the tile it comes off.
 
-function hexIcon(resource, cx, cy) {
-  const g = el("g", { class: "hex-icon" });
-  const put = (tag, attrs, cls) => {
-    const n = el(tag, attrs);
-    n.setAttribute("class", `hex-icon ${cls}`);
-    g.appendChild(n);
-  };
-  if (resource === "wood") {
-    put("path", { d: `M ${cx} ${cy - 20} l 9 15 h -18 z` }, "dark");
-    put("path", { d: `M ${cx} ${cy - 11} l 11 17 h -22 z` }, "dark");
-    put("rect", { x: cx - 2, y: cy + 6, width: 4, height: 7 }, "dark");
-  } else if (resource === "sheep") {
-    put("ellipse", { cx: cx - 2, cy: cy, rx: 15, ry: 10 }, "light");
-    put("circle", { cx: cx + 12, cy: cy - 4, r: 6 }, "light");
-  } else if (resource === "wheat") {
-    put("rect", { x: cx - 1.5, y: cy - 16, width: 3, height: 30, rx: 1.5 }, "dark");
-    for (let i = 0; i < 3; i++) {
-      const y = cy - 12 + i * 8;
-      put("ellipse", { cx: cx - 7, cy: y, rx: 6, ry: 3, transform: `rotate(-28 ${cx - 7} ${y})` }, "dark");
-      put("ellipse", { cx: cx + 7, cy: y, rx: 6, ry: 3, transform: `rotate(28 ${cx + 7} ${y})` }, "dark");
-    }
-  } else if (resource === "brick") {
-    for (let r = 0; r < 3; r++) {
-      const off = r % 2 ? -7 : 0;
-      for (let c = 0; c < 2; c++) {
-        put("rect", {
-          x: cx - 16 + off + c * 17, y: cy - 14 + r * 10,
-          width: 14, height: 7.5, rx: 1.5,
-        }, "clay");
-      }
-    }
-  } else if (resource === "ore") {
-    put("path", { d: `M ${cx - 16} ${cy + 10} l 9 -17 l 9 17 z` }, "stone");
-    put("path", { d: `M ${cx - 3} ${cy + 10} l 11 -21 l 11 21 z` }, "stone");
-  } else if (resource === "desert") {
-    put("rect", { x: cx - 2.5, y: cy - 16, width: 5, height: 28, rx: 2.5 }, "dark");
-    put("path", { d: `M ${cx - 2} ${cy - 4} h -8 v -8`, fill: "none", stroke: "#1c3a22", "stroke-width": 4.5 }, "dark");
-    put("path", { d: `M ${cx + 2} ${cy - 8} h 8 v -6`, fill: "none", stroke: "#1c3a22", "stroke-width": 4.5 }, "dark");
-  }
-  return g;
+   Flat colour is what the tiles were before, and "which pale green is sheep
+   and which is wood" is a question you should never have to ask mid-turn. */
+
+/* Every scene keeps the middle of the box clear. The number token is an opaque
+   disc over the centre of the tile, so anything drawn there is simply not
+   there -- the first pass put a sheep behind every "8" and all you could see
+   was one ear. Subjects go to the sides and the bottom, and the token sits in
+   the hole they leave, the way the printed tiles do it. */
+const RES_ART = {
+  wood: `
+    <path d="M0 48 h48 v-7 q-12 -5 -24 -1 q-12 4 -24 0 z" fill="#1a4d2b"/>
+    <path d="M1 45 L11 22 L21 45 Z" fill="#14512a"/>
+    <path d="M3 33 L11 11 L19 33 Z" fill="#1e6b38"/>
+    <rect x="9" y="42" width="4" height="6" fill="#4a3320"/>
+    <path d="M27 46 L37.5 20 L48 46 Z" fill="#113f22"/>
+    <path d="M29 33 L37.5 8 L46 33 Z" fill="#1a6033"/>
+    <rect x="35.5" y="43" width="4" height="5" fill="#4a3320"/>`,
+  sheep: `
+    <path d="M0 48 h48 v-9 q-24 7 -48 0 z" fill="#6f9e33"/>
+    <ellipse cx="14" cy="37" rx="12" ry="8" fill="#f7f9f4"/>
+    <circle cx="6"  cy="33" r="4.5" fill="#f7f9f4"/>
+    <circle cx="15" cy="30" r="5.5" fill="#f7f9f4"/>
+    <rect x="8"  y="43" width="3" height="5" rx="1.5" fill="#453f38"/>
+    <rect x="18" y="43" width="3" height="5" rx="1.5" fill="#453f38"/>
+    <ellipse cx="27" cy="35" rx="5" ry="6" fill="#453f38"/>
+    <ellipse cx="31" cy="31" rx="3" ry="2.2" fill="#332e29"/>
+    <circle cx="29" cy="33" r="1.3" fill="#fff"/>
+    <ellipse cx="38" cy="12" rx="8" ry="5.5" fill="#eef1e9"/>
+    <circle cx="32" cy="9" r="3.5" fill="#eef1e9"/>
+    <ellipse cx="45" cy="11" rx="3.4" ry="4" fill="#453f38"/>`,
+  wheat: `
+    <path d="M0 48 h48 v-8 q-24 6 -48 0 z" fill="#c2951f"/>
+    <g stroke="#9c6c1c" stroke-width="2.3" stroke-linecap="round" fill="none">
+      <path d="M8 46 V16"/><path d="M40 46 V16"/><path d="M24 48 V34"/>
+    </g>
+    <g fill="#f5d35a">
+      <ellipse cx="8" cy="11" rx="3.4" ry="5"/>
+      <ellipse cx="3"  cy="19" rx="5.4" ry="2.8" transform="rotate(-36 3 19)"/>
+      <ellipse cx="13" cy="19" rx="5.4" ry="2.8" transform="rotate(36 13 19)"/>
+      <ellipse cx="3"  cy="27" rx="5.4" ry="2.8" transform="rotate(-36 3 27)"/>
+      <ellipse cx="13" cy="27" rx="5.4" ry="2.8" transform="rotate(36 13 27)"/>
+      <ellipse cx="40" cy="11" rx="3.4" ry="5"/>
+      <ellipse cx="35" cy="19" rx="5.4" ry="2.8" transform="rotate(-36 35 19)"/>
+      <ellipse cx="45" cy="19" rx="5.4" ry="2.8" transform="rotate(36 45 19)"/>
+      <ellipse cx="35" cy="27" rx="5.4" ry="2.8" transform="rotate(-36 35 27)"/>
+      <ellipse cx="45" cy="27" rx="5.4" ry="2.8" transform="rotate(36 45 27)"/>
+      <ellipse cx="24" cy="31" rx="3" ry="4.4"/>
+      <ellipse cx="19" cy="38" rx="5" ry="2.6" transform="rotate(-36 19 38)"/>
+      <ellipse cx="29" cy="38" rx="5" ry="2.6" transform="rotate(36 29 38)"/>
+    </g>`,
+  brick: `
+    <path d="M0 48 h48 v-9 q-24 6 -48 0 z" fill="#8c4523"/>
+    <g fill="#b84d26">
+      <rect x="-2" y="30" width="17" height="8.5" rx="1.5"/>
+      <rect x="17" y="30" width="17" height="8.5" rx="1.5"/>
+      <rect x="36" y="30" width="14" height="8.5" rx="1.5"/>
+      <rect x="6"  y="39.5" width="17" height="8.5" rx="1.5"/>
+      <rect x="25" y="39.5" width="17" height="8.5" rx="1.5"/>
+      <rect x="-2" y="4" width="15" height="8" rx="1.5"/>
+      <rect x="35" y="4" width="15" height="8" rx="1.5"/>
+      <rect x="5"  y="13.5" width="15" height="8" rx="1.5"/>
+      <rect x="28" y="13.5" width="15" height="8" rx="1.5"/>
+    </g>
+    <g fill="#dd7043" opacity=".8">
+      <rect x="-2" y="30" width="17" height="2.4" rx="1"/>
+      <rect x="17" y="30" width="17" height="2.4" rx="1"/>
+      <rect x="36" y="30" width="14" height="2.4" rx="1"/>
+      <rect x="-2" y="4"  width="15" height="2.2" rx="1"/>
+      <rect x="35" y="4"  width="15" height="2.2" rx="1"/>
+    </g>`,
+  ore: `
+    <path d="M-4 48 L12 14 L28 48 Z" fill="#71808f"/>
+    <path d="M12 14 L18.5 28 L12 31 L5.5 28 Z" fill="#f0f5fa"/>
+    <path d="M20 48 L36 9 L52 48 Z" fill="#5a6773"/>
+    <path d="M36 9 L42.5 24 L36 27 L29.5 24 Z" fill="#dde5ee"/>
+    <g fill="#39434e">
+      <path d="M30 44 l4.5 -6.5 4.5 6.5 -4.5 4.5 z"/>
+      <path d="M9 45 l3.5 -5 3.5 5 -3.5 3.5 z"/>
+    </g>
+    <circle cx="34.5" cy="43" r="1.7" fill="#8fd0e8"/>`,
+  desert: `
+    <circle cx="39" cy="11" r="6" fill="#f7e2ae"/>
+    <path d="M0 40 q12 -8 24 -3 q12 5 24 -3 V48 H0 Z" fill="#c4a068"/>
+    <rect x="20" y="14" width="6" height="26" rx="3" fill="#3f7a44"/>
+    <path d="M21 27 h-6 v-8" stroke="#3f7a44" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M26 22 h6 v-6" stroke="#357038" stroke-width="5" fill="none" stroke-linecap="round"/>`,
+};
+
+/** The same drawing as an inline <svg>, for anywhere that isn't the board. */
+function resArt(resource, size = 26) {
+  return `<svg class="art" viewBox="0 0 48 48" width="${size}" height="${size}"
+            aria-hidden="true">${RES_ART[resource] || ""}</svg>`;
+}
+
+function hexIcon(resource, cx, cy, clipId) {
+  // Scaled up until the scene fills the tile rather than floating in it, and
+  // clipped to the tile so it can: the ground each scene stands on is wider
+  // than the hex at its base, and without a clip it spills over the edge onto
+  // the neighbour.
+  // Two groups, not one: a clip-path is resolved in the coordinate system the
+  // element itself establishes, so putting both on one <g> scales the clip
+  // polygon by 2.15 as well and it stops lining up with the tile. The outer
+  // group clips in board space; the inner one does the scaling.
+  const outer = el("g", { class: "hex-icon" });
+  if (clipId) outer.setAttribute("clip-path", `url(#${clipId})`);
+  const inner = el("g", {
+    transform: `translate(${cx} ${cy}) scale(1.62) translate(-24 -24)`,
+  });
+  inner.innerHTML = RES_ART[resource] || "";
+  outer.appendChild(inner);
+  return outer;
+}
+
+/** A resource card the size of a playing card, the way the game draws them. */
+function resCard(resource, n, extra = "") {
+  return `<div class="rcard ${resource} ${extra}">
+            ${resArt(resource, 30)}
+            <span class="rcount">${n}</span>
+          </div>`;
+}
+
+/** A row of cards from a list like ["wood","wood","brick"]. */
+function cardRow(list, cls = "") {
+  const counts = {};
+  for (const r of list || []) counts[r] = (counts[r] || 0) + 1;
+  const parts = Object.entries(counts).map(([r, n]) => resCard(r, n, `mini ${cls}`));
+  return parts.length ? parts.join("") : '<span class="nocards">nothing</span>';
 }
 
 function renderBoard() {
@@ -71,8 +162,17 @@ function renderBoard() {
   const g = state.geometry, cfg = state.config;
   if (!g || !cfg) return;
 
+  const defs = el("defs");
   const sand = el("g"), tiles = el("g"), ports = el("g");
   const pieces = el("g"), hints = el("g", { class: "hint", id: "hints" });
+
+  // one clip per tile, so each scene stays inside its own hex
+  for (const h of g.hexes) {
+    const cp = el("clipPath", { id: `clip-h${h.id}` });
+    cp.appendChild(el("polygon", { points: h.points }));
+    defs.appendChild(cp);
+  }
+  svg.appendChild(defs);
 
   // beach: slightly larger hexes behind the tiles
   for (const h of g.hexes) {
@@ -84,7 +184,7 @@ function renderBoard() {
   for (const h of g.hexes) {
     const t = cfg.hexes[h.id];
     tiles.appendChild(el("polygon", { points: h.points, class: `hex ${t.resource}` }));
-    tiles.appendChild(hexIcon(t.resource, h.cx, h.cy));
+    tiles.appendChild(hexIcon(t.resource, h.cx, h.cy, `clip-h${h.id}`));
     if (t.number) {
       const tok = el("g", { class: "token" });
       tok.appendChild(el("circle", { cx: h.cx, cy: h.cy, r: 16 }));
@@ -285,12 +385,17 @@ function drawHint(move) {
    making you scan eleven stacked lists. Categories keep a fixed order and a
    fixed colour, so position alone tells you what you're looking at. */
 
+/* Offers used to be a seventh category here. They are now a panel of their own
+   above this list, drawn as cards -- the same offer in two places, one of them
+   a one-line summary, was the panel's worst duplication. */
 const CATS = [
-  { key: "incoming", name: "Respond",  color: "var(--deal)"  },
   { key: "place",    name: "Place",    color: "var(--place)" },
   { key: "dev",      name: "Dev card", color: "var(--dev)"   },
   { key: "bank",     name: "Bank",     color: "var(--bank)"  },
-  { key: "offer",    name: "Offer",    color: "var(--deal)"  },
+  // proposals are drawn as cards in the Trades panel; they stay in the ranking
+  // so one can still be the single best thing to do, but they are not listed
+  // twice
+  { key: "offer",    name: "Offer",    color: "var(--deal)", panel: false },
   { key: "robber",   name: "Robber",   color: "var(--rob)"   },
 ];
 
@@ -331,19 +436,6 @@ function categorise(rec) {
       move: { steps: [{ type: "move_robber", robber_hex: r.hex, steal_from: r.steal_from }] },
     });
   }
-  for (const a of rec.offer_advice || []) {
-    const o = a.offer || {};
-    // one you have already answered is in progress, not a decision
-    if (a.verdict === "waiting") {
-      out.incoming.push({ score: -1, tag: "sent", text: a.text, why: null });
-      continue;
-    }
-    out.incoming.push({
-      score: a.score ?? 0, tag: a.verdict,
-      text: `${o.from ?? "?"}: give ${(o.wants || []).join(", ") || "?"} → get ${(o.offers || []).join(", ") || "?"}`,
-      why: a.text,
-    });
-  }
   for (const p of rec.proposals || []) {
     out.offer.push({ score: p.score ?? 0, text: p.text, why: null });
   }
@@ -366,33 +458,159 @@ const DEV_LABEL = {
   year_of_plenty: "year of plenty", monopoly: "monopoly", victory_point: "point",
 };
 
+/* The hand lives along the bottom of the screen, where the game puts it and
+   where you are already looking. Everything you own is one glance away: the
+   resource cards, the development cards, and the two numbers that decide
+   whether a 7 hurts. */
 function renderHand(rec) {
-  const strip = $("#hand-strip");
-  strip.replaceChildren();
+  const cards = $("#dock-cards"), devbox = $("#dock-dev"), meta = $("#dock-meta");
   const hand = rec?.hand || {};
   const held = Object.entries(hand).filter(([, n]) => n > 0);
-  strip.innerHTML = held.length
-    ? held.map(([r, n]) => `<span class="hcard ${r}">${n} ${RES_ABBR[r] || r}</span>`).join("")
-    : '<span class="hcard empty">no cards</span>';
+  const total = held.reduce((s, [, n]) => s + n, 0);
+
+  cards.innerHTML = held.length
+    ? held.map(([r, n]) => resCard(r, n)).join("")
+    : '<span class="nocards">no resource cards</span>';
 
   // Development cards were never shown at all. Buy one and it vanished: the
   // card is unplayable the turn it is bought, so the Dev Card row correctly
   // said "nothing available", and with the card itself invisible that reads as
   // the card having been lost.
-  const dev = rec?.my_dev;
-  if (!dev?.count) return;
+  const dev = rec?.my_dev || {};
   const fresh = dev.bought_this_turn || {};
+  // which card, if any, we are telling them to play right now -- so the card
+  // itself lights up rather than only the sentence about it
+  const urge = (rec?.dev_plays || []).find((d) => (d.score ?? 0) > 0);
   const chips = [];
   for (const [card, n] of Object.entries(dev.known || {})) {
     const pending = fresh[card] || 0;
-    if (n - pending > 0) chips.push(`<span class="dcard">${n - pending} ${DEV_LABEL[card] || card}</span>`);
+    const ready = n - pending;
+    if (ready > 0) {
+      const hot = urge && urge.card === card && rec?.my_turn && !dev.played_this_turn;
+      chips.push(
+        `<div class="dcard${hot ? " play-now" : ""}">
+           <span class="dname">${DEV_LABEL[card] || card}</span>
+           ${ready > 1 ? `<span class="dn">×${ready}</span>` : ""}
+           ${hot ? '<span class="dgo">play now</span>' : ""}
+         </div>`);
+    }
     if (pending) chips.push(
-      `<span class="dcard fresh" title="a card cannot be played the turn it is bought">` +
-      `${pending} ${DEV_LABEL[card] || card} · next turn</span>`);
+      `<div class="dcard fresh" title="a card cannot be played the turn it is bought">
+         <span class="dname">${DEV_LABEL[card] || card}</span>
+         <span class="dn">next turn</span>
+       </div>`);
   }
-  if (dev.hidden) chips.push(`<span class="dcard unknown">${dev.hidden} face down</span>`);
-  if (dev.played_this_turn) chips.push('<span class="dcard spent">card played this turn</span>');
-  strip.insertAdjacentHTML("beforeend", `<span class="dev-sep"></span>` + chips.join(""));
+  if (dev.hidden) chips.push(`<div class="dcard unknown"><span class="dname">${dev.hidden} face down</span></div>`);
+  if (dev.played_this_turn) chips.push('<div class="dcard spent"><span class="dname">card already played</span></div>');
+  devbox.innerHTML = chips.length
+    ? `<span class="dock-label">dev</span>` + chips.join("")
+    : "";
+
+  const limit = rec?.discard_limit ?? 7;
+  const over = total > limit;
+  meta.innerHTML = `
+    <span class="tally${over ? " over" : ""}">${total}<small>/${limit}</small></span>
+    ${over ? `<span class="tally-warn">a 7 costs you ${Math.floor(total / 2)}</span>` : ""}`;
+}
+
+/* Trades, as cards. Two lists, both drawn the same way so the eye reads them
+   the same way: what to propose, and what has actually happened at the table.
+   These were text before -- "orange gave wheat, got sheep" -- which is the
+   information but not in the shape you see it on the game screen, so matching
+   one against the other meant translating every line. */
+function renderTrades(rec) {
+  const box = $("#trades");
+  const proposals = rec?.proposals || [];
+  const log = (rec?.trade_log || []).slice().reverse();   // newest first
+  $("#trades-sub").textContent = proposals.length
+    ? `${proposals.length} to make` : "";
+
+  const spread = (obj) => Object.entries(obj || {}).flatMap(([r, n]) => Array(n).fill(r));
+
+  const ask = proposals.map((p) => `
+    <div class="trow ask">
+      <span class="tw ${p.to || ""}">ask ${p.to || "?"}</span>
+      <div class="tswap">
+        ${cardRow(spread(p.give), "want")}
+        <span class="arrow">→</span>
+        ${cardRow(spread(p.get), "get")}
+      </div>
+      ${p.for ? `<span class="tfor">for a ${p.for}</span>` : ""}
+      <span class="ts">${(p.score ?? 0).toFixed(1)}</span>
+    </div>`).join("");
+
+  const done = log.map((e) => {
+    const mine = e.color === state.myColor;
+    if (e.kind === "trade_offered") {
+      return `<div class="trow offered${mine ? " mine" : ""}">
+        <span class="tw ${e.color || ""}">${e.color || "?"} offers</span>
+        <div class="tswap">
+          ${cardRow(e.offers, "get")}
+          <span class="arrow">⇄</span>
+          ${cardRow(e.wants, "want")}
+        </div>
+      </div>`;
+    }
+    const other = e.kind === "trade_bank" ? "bank" : (e.with || "?");
+    return `<div class="trow done${mine ? " mine" : ""}">
+      <span class="tw ${e.color || ""}">${e.color || "?"}</span>
+      <div class="tswap">
+        ${cardRow(e.gave, "want")}
+        <span class="arrow">⇄</span>
+        ${cardRow(e.got, "get")}
+      </div>
+      <span class="tfor">with ${other}</span>
+    </div>`;
+  }).join("");
+
+  box.innerHTML =
+    (ask ? `<div class="tgroup"><h4>worth proposing</h4>${ask}</div>` : "") +
+    (done ? `<div class="tgroup"><h4>at the table</h4>${done}</div>` : "") ||
+    '<div class="tempty">no trades yet</div>';
+}
+
+const VERDICT_WORD = {
+  accept: "Accept", reject: "Reject", counter: "Counter",
+  waiting: "Waiting", cannot: "Can't",
+};
+
+/* Incoming offers, drawn the way the game draws them -- their cards, an arrow,
+   your cards -- with the answer stated as a word rather than a number. These
+   sit above everything else because they expire; an offer you read too late is
+   the same as an offer you never saw. */
+function renderOffers(rec) {
+  const box = $("#offers");
+  const advice = (rec?.offer_advice || []).filter((a) => a.verdict !== "cannot");
+  if (!advice.length) { box.replaceChildren(); box.classList.remove("has"); return; }
+  box.classList.add("has");
+
+  box.innerHTML = advice.map((a) => {
+    const o = a.offer || {};
+    // `offers` is what they hand over, `wants` is what they ask of you
+    const counter = a.counter
+      ? `<div class="ctr">instead offer
+           ${cardRow(Object.entries(a.counter.give || {})
+             .flatMap(([r, n]) => Array(n).fill(r)), "want")}</div>`
+      : "";
+    return `
+      <article class="offer v-${a.verdict}">
+        <header>
+          <span class="who ${o.from || ""}">${o.from || "someone"}</span>
+          <span class="verdict">${VERDICT_WORD[a.verdict] || a.verdict}</span>
+        </header>
+        <div class="swap">
+          <div class="side"><span class="slab">you get</span>${cardRow(o.offers, "get")}</div>
+          <span class="arrow">⇄</span>
+          <div class="side"><span class="slab">you give</span>${cardRow(o.wants, "want")}</div>
+        </div>
+        <p class="why"></p>
+        ${counter}
+      </article>`;
+  }).join("");
+
+  box.querySelectorAll(".offer").forEach((node, i) => {
+    node.querySelector(".why").textContent = advice[i].text || "";
+  });
 }
 
 function renderUrgent(rec) {
@@ -428,11 +646,8 @@ function renderUrgent(rec) {
       ? `first: ${knight.location_hint}`
       : "nothing else is available until you do");
   }
-  const waiting = (rec?.offer_advice || []).filter((a) => a.verdict !== "cannot");
-  if (waiting.length && !rec?.my_turn) {
-    add(`${waiting.length} offer${waiting.length > 1 ? "s" : ""} on the table`,
-        waiting[0].text);
-  }
+  // offers used to raise an alert here too; they now have their own panel
+  // immediately below, drawn as the cards they actually are
 }
 
 /* The best action is the best across *every* category, not just the solver's
@@ -483,12 +698,12 @@ function renderPrimary(rec, groups) {
   state.heroMove = item.move || null;
 }
 
-const openCats = new Set(["incoming"]);
+const openCats = new Set(["place"]);
 
 function renderActions(rec, groups) {
   const box = $("#actions");
   box.replaceChildren();
-  // Order: what expires, then what is worth most, then everything empty.
+  // Order: what is worth most, then everything empty.
   //
   // Ranking by score only became meaningful once every score was in turns.
   // Before that, placements were weighted pips and an incoming offer carried a
@@ -496,10 +711,8 @@ function renderActions(rec, groups) {
   // sorting on that would have floated Respond to the top permanently while
   // looking like a ranking.
   //
-  // Two things still outrank value. An offer on the table has a clock on it and
-  // is gone if ignored, which no score expresses; and scores move every poll,
-  // so a category only overtakes another by a clear margin, or the panel
-  // reshuffles under the cursor while you are reading it.
+  // Scores move every poll, so a category only overtakes another by a clear
+  // margin, or the panel reshuffles under the cursor while you are reading it.
   const STICKY = 0.5;
   const rank = (c) => {
     const best = groups[c.key]?.[0];
@@ -511,13 +724,11 @@ function renderActions(rec, groups) {
     if (ra === null && rb === null) return CATS.indexOf(a) - CATS.indexOf(b);
     if (ra === null) return 1;
     if (rb === null) return -1;
-    // an offer you can still answer comes first whatever it is worth
-    const urgent = (c) => (c.key === "incoming" ? 1 : 0);
-    if (urgent(a) !== urgent(b)) return urgent(b) - urgent(a);
     if (ra !== rb) return rb - ra;
     return CATS.indexOf(a) - CATS.indexOf(b);
   });
   for (const cat of ranked) {
+    if (cat.panel === false) continue;
     const items = groups[cat.key] || [];
     const wrap = document.createElement("section");
     wrap.className = `cat${items.length ? "" : " empty"}${openCats.has(cat.key) && items.length ? " open" : ""}`;
@@ -670,9 +881,11 @@ function renderPanel(rec) {
 
   renderHand(rec);
   renderUrgent(rec);
+  renderOffers(rec);
   const groups = categorise(rec);
   renderPrimary(rec, groups);
   renderActions(rec, groups);
+  renderTrades(rec);
   drawHint(state.heroMove);
   renderEngine(rec);
   renderPlan(rec);

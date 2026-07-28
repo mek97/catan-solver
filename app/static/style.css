@@ -29,6 +29,8 @@
 
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --disp: "Chakra Petch", "Segoe UI", sans-serif;
+
+  --dock-h: 86px;   /* the hand strip along the bottom */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -41,7 +43,8 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
-main { display: flex; height: 100vh; }
+/* the board and the advice share what is left once the hand has its strip */
+main { display: flex; height: calc(100vh - var(--dock-h)); }
 
 /* ---------------- board ---------------- */
 
@@ -123,9 +126,12 @@ main { display: flex; height: 100vh; }
 .hex.wood { fill: #2f7d43; } .hex.sheep { fill: #8fc63f; }
 .hex.wheat { fill: #e8b93c; } .hex.brick { fill: #cf6a33; }
 .hex.ore { fill: #9aa6b1; } .hex.desert { fill: #dcc79a; }
-.hex-icon { opacity: .5; }
-.hex-icon.dark { fill: #1c3a22; } .hex-icon.light { fill: #fff; }
-.hex-icon.stone { fill: #5d6b78; } .hex-icon.clay { fill: #f6ded0; }
+/* the art carries its own colours now, so it only has to sit back far enough
+   that the number token stays legible on top of it */
+.hex-icon { opacity: .92; }
+/* the token sits over the middle of the drawing: give it a disc of its own so
+   it never has to compete with a tree trunk for contrast */
+.token circle { filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 
 .token circle { fill: #f6efdb; stroke: rgba(0,0,0,.25); stroke-width: 1.2; }
 .token text.num { font: 700 18px var(--disp); text-anchor: middle; fill: #33302a; }
@@ -198,17 +204,156 @@ main { display: flex; height: 100vh; }
 #timer.urgent { color: var(--rob); }
 #turn-sub { color: var(--faint); font: 400 11.5px var(--mono); margin-top: 1px; }
 
-#hand-strip { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
-.hcard {
-  font: 600 11px var(--mono); padding: 2px 7px; border-radius: 4px;
-  border: 1px solid rgba(255,255,255,.09);
+/* ---------------- your hand, docked ----------------
+   Along the bottom, where the game itself puts it. The panel above is advice;
+   this strip is fact, so it is lit differently and never scrolls away. */
+
+#dock {
+  position: fixed; left: 0; right: 0; bottom: 0; height: var(--dock-h);
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 18px; z-index: 5;
+  background: linear-gradient(180deg, #131b27 0%, #0c1219 100%);
+  border-top: 1px solid var(--rule);
+  box-shadow: 0 -14px 34px rgba(0,0,0,.5);
 }
-.hcard.wood { background: rgba(47,125,67,.34); }
-.hcard.brick { background: rgba(207,106,51,.34); }
-.hcard.sheep { background: rgba(143,198,63,.3); }
-.hcard.wheat { background: rgba(232,185,60,.3); }
-.hcard.ore { background: rgba(154,166,177,.3); }
-.hcard.empty { color: var(--faint); background: none; border-style: dashed; }
+#dock-cards { display: flex; gap: 7px; align-items: flex-end; }
+#dock-dev { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            padding-left: 18px; border-left: 1px solid var(--rule); min-height: 40px; }
+#dock-meta { margin-left: auto; display: flex; align-items: baseline; gap: 12px; }
+.dock-label {
+  font: 600 9.5px var(--mono); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--faint); margin-right: 2px;
+}
+
+/* a resource card, drawn like a card */
+.rcard {
+  position: relative; width: 46px; height: 62px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(0,0,0,.45);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 2px 5px rgba(0,0,0,.45);
+  transition: transform .12s ease;
+}
+#dock-cards .rcard:hover { transform: translateY(-4px); }
+.rcard.wood   { background: linear-gradient(165deg, #4a9f5d, #2c6f3e); }
+.rcard.brick  { background: linear-gradient(165deg, #e08b58, #b8552c); }
+.rcard.sheep  { background: linear-gradient(165deg, #b6dc73, #7fb43a); }
+.rcard.wheat  { background: linear-gradient(165deg, #f4cf6a, #d9a52c); }
+.rcard.ore    { background: linear-gradient(165deg, #b3bec9, #7d8a97); }
+.rcard.desert { background: linear-gradient(165deg, #e6d3a5, #c4a068); }
+.rcount {
+  position: absolute; right: -4px; bottom: -4px;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: var(--ink); border: 1px solid rgba(255,255,255,.22);
+  font: 700 11px var(--mono); color: var(--text);
+  display: flex; align-items: center; justify-content: center;
+}
+.rcard.mini { width: 30px; height: 40px; border-radius: 5px; }
+.rcard.mini .art { width: 20px; height: 20px; }
+.rcard.mini .rcount { min-width: 15px; height: 15px; font-size: 9.5px; right: -3px; bottom: -3px; }
+.nocards { font: 400 11.5px var(--mono); color: var(--faint); }
+
+.tally { font: 700 20px var(--mono); color: var(--dim); }
+.tally small { font-size: 12px; color: var(--faint); font-weight: 500; }
+.tally.over { color: var(--rob); }
+.tally-warn { font: 600 11px var(--mono); color: var(--rob); }
+
+/* development cards: chips, but the one to play now is unmissable */
+.dcard {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px; border-radius: 6px;
+  background: rgba(88,201,138,.13); border: 1px solid rgba(88,201,138,.3);
+  font: 600 11px var(--mono); color: #a8e6c4; white-space: nowrap;
+}
+.dcard .dn { color: var(--faint); font-weight: 500; }
+.dcard.fresh { background: none; border-style: dashed;
+               border-color: rgba(255,255,255,.16); color: var(--faint); }
+.dcard.unknown { background: rgba(255,255,255,.05); border-color: var(--rule); color: var(--dim); }
+.dcard.spent { background: none; border-color: var(--rule); color: var(--faint); }
+.dcard.play-now {
+  background: var(--dev); border-color: var(--dev); color: #08160e;
+  box-shadow: 0 0 0 3px rgba(88,201,138,.2);
+  animation: dev-pulse 1.5s ease-in-out infinite;
+}
+.dcard.play-now .dgo {
+  font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  background: rgba(0,0,0,.28); padding: 2px 5px; border-radius: 3px;
+}
+@keyframes dev-pulse {
+  50% { box-shadow: 0 0 0 7px rgba(88,201,138,0); }
+}
+
+/* ---------------- incoming offers ----------------
+   Drawn the way the game draws a trade -- their cards, an arrow, yours -- so
+   you can check it against the screen without translating. */
+
+#offers.has { display: flex; flex-direction: column; gap: 8px; margin: 10px 16px 0; }
+.offer {
+  border: 1px solid var(--rule); border-left: 3px solid var(--deal);
+  border-radius: 8px; background: var(--ink-2); padding: 10px 12px;
+}
+.offer.v-accept { border-left-color: var(--dev); }
+.offer.v-reject { border-left-color: var(--rob); }
+.offer.v-counter { border-left-color: var(--place); }
+.offer.v-waiting { border-left-color: var(--faint); opacity: .72; }
+.offer header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.offer .who {
+  font: 700 12px var(--disp); letter-spacing: .04em; text-transform: uppercase;
+}
+.offer .who.red { color: var(--red); } .offer .who.blue { color: var(--blue); }
+.offer .who.orange { color: var(--orange); } .offer .who.green { color: var(--green); }
+.offer .who.white { color: var(--white); } .offer .who.brown { color: var(--brown); }
+.offer .verdict {
+  margin-left: auto; font: 700 11px var(--disp); letter-spacing: .1em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 5px;
+}
+.v-accept .verdict { background: var(--dev); color: #08160e; }
+.v-reject .verdict { background: var(--rob); color: #1a0908; }
+.v-counter .verdict { background: var(--place); color: #1a1204; }
+.v-waiting .verdict { background: var(--rule); color: var(--dim); }
+.swap { display: flex; align-items: center; gap: 12px; }
+.swap .side { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.swap .slab {
+  font: 600 9px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); margin-right: 2px;
+}
+.swap .arrow { color: var(--faint); font-size: 15px; }
+.offer .why { margin-top: 8px; font: 400 12px var(--disp); color: var(--dim); line-height: 1.45; }
+.offer .ctr {
+  margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--rule);
+  display: flex; align-items: center; gap: 6px;
+  font: 600 10.5px var(--mono); color: var(--place);
+}
+
+/* ---------------- trades ---------------- */
+
+#trades { display: flex; flex-direction: column; gap: 12px; padding: 2px 0 6px; }
+.tgroup h4 {
+  font: 700 9px var(--disp); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 6px;
+}
+.trow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; border-radius: 7px; background: var(--ink-2);
+  border: 1px solid var(--rule); margin-bottom: 5px;
+}
+.trow.mine { border-color: rgba(240,180,41,.35); }
+.trow.ask { border-left: 2px solid var(--deal); }
+.tswap { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.tw {
+  min-width: 66px; font: 700 10px var(--disp); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--dim);
+}
+.tw.red { color: var(--red); } .tw.blue { color: var(--blue); }
+.tw.orange { color: var(--orange); } .tw.green { color: var(--green); }
+.tw.white { color: var(--white); } .tw.brown { color: var(--brown); }
+.tfor { font: 400 10px var(--mono); color: var(--faint); }
+.ts { margin-left: auto; font: 600 10.5px var(--mono); color: var(--faint); }
+.tempty { font: 400 11.5px var(--mono); color: var(--faint); padding: 4px 0; }
+.trow .arrow { color: var(--faint); font-size: 13px; }
+/* the cards in a trade row are smaller again -- a row is a fact, not a choice */
+.trow .rcard.mini { width: 24px; height: 32px; }
+.trow .rcard.mini .art { width: 17px; height: 17px; }
+.trow .rcard.mini .rcount { min-width: 13px; height: 13px; font-size: 8.5px; }
 
 /* urgent strip (must discard / offer awaiting reply) */
 .alert {
@@ -224,14 +369,19 @@ main { display: flex; height: 100vh; }
 
 /* hero action */
 #primary { padding: 14px 16px 4px; }
+/* The one thing to do next. It is the largest type on the page on purpose --
+   mid-turn you should be able to read it from across the room and go back to
+   the game, not hunt for it among six equally-weighted rows. */
 .hero {
-  position: relative; padding: 13px 14px 13px 16px; border-radius: 10px;
-  background: linear-gradient(135deg, var(--ink-3), var(--ink-2));
-  border: 1px solid var(--rule);
+  position: relative; padding: 15px 16px 15px 20px; border-radius: 10px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--cat, var(--place)) 16%, transparent), transparent 62%),
+    linear-gradient(135deg, var(--ink-3), var(--ink-2));
+  border: 1px solid color-mix(in srgb, var(--cat, var(--place)) 32%, var(--rule));
   overflow: hidden;
 }
 .hero::before {
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
   background: var(--cat, var(--place));
 }
 .hero-top { display: flex; align-items: center; gap: 8px; }
@@ -240,7 +390,7 @@ main { display: flex; height: 100vh; }
   color: var(--cat, var(--place));
 }
 .hero-score { margin-left: auto; font: 600 11px var(--mono); color: var(--faint); }
-.hero-act { font: 600 15.5px/1.35 var(--disp); margin: 6px 0 5px; }
+.hero-act { font: 700 20px/1.28 var(--disp); margin: 7px 0 6px; letter-spacing: .01em; }
 .hero-why { color: var(--dim); font: 400 12px/1.5 var(--mono); }
 .hero-empty { color: var(--faint); font: 400 13px var(--mono); padding: 4px 0; }
 
@@ -343,10 +493,14 @@ main { display: flex; height: 100vh; }
 .eng-text { flex: 1; color: var(--dim); }
 .eng-meta { color: var(--faint); font-size: 10px; }
 
-/* the route to ten points */
-#intel-plan { border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
-#intel-plan > summary { cursor: pointer; font: 600 10px var(--mono); letter-spacing: .08em;
+/* the route to ten points, and the trade table */
+#intel-plan, #intel-trades { border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+#intel-plan > summary, #intel-trades > summary {
+  cursor: pointer; font: 600 10px var(--mono); letter-spacing: .08em;
   text-transform: uppercase; color: var(--faint); padding: 8px 12px; }
+#intel-trades > summary { padding: 10px 16px; }
+#trades-sub { color: var(--deal); text-transform: none; letter-spacing: 0; }
+#trades { padding: 0 16px 10px; }
 #plan { padding: 0 12px 10px; }
 .plan-head { display: flex; justify-content: space-between; align-items: baseline;
   font: 600 11px var(--mono); color: var(--dim); margin-bottom: 6px; }
