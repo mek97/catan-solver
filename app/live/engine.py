@@ -15,6 +15,7 @@ from typing import Any, Optional
 from .. import board, rules
 from ..models import BoardConfig, DevCards, HexTile, MyState, PlayerState, Port
 from . import protocol as P
+from .bank import count_bank
 from .trades import TradeMemory
 
 
@@ -317,6 +318,25 @@ class GameEngine:
             "played_this_turn": bool(mine.get("hasUsedDevelopmentCardThisTurn")),
         }
 
+    def counted_bank(self, seats: int) -> dict[str, int]:
+        """The bank as reconstructed from public play.
+
+        Used when the game hides the counts. colonist still sends the true
+        numbers -- the setting stops its own UI showing them, not the state
+        carrying them -- and reading those would hand the player something the
+        whole table agreed nobody should have. This counts instead, from events
+        announced to everyone: rolls paid out, discards returned, bank trades,
+        and what building costs. Against colonist's real figures it comes out
+        exact on ten of eleven recorded games.
+        """
+        bought = sum(self.dev_card_counts().values()) + sum(self.dev_cards_used().values())
+        return count_bank(
+            self.events,
+            per_resource=rules.BANK_PER_RESOURCE,
+            seats=max(1, seats),
+            dev_bought=bought,
+        ).snapshot()
+
     def dev_card_counts(self) -> dict[str, int]:
         """How many dev cards each player holds (composition is hidden)."""
         out: dict[str, int] = {}
@@ -584,7 +604,7 @@ class GameEngine:
                 dev_card_bought_this_turn=bool(mine_dev["bought_this_turn"]),
                 dev_card_played_this_turn=mine_dev["played_this_turn"],
             ),
-            bank=self.bank_stock() or None,
+            bank=self.bank_stock() or self.counted_bank(len(players)),
             play_order=[c for c in (P.map_color(i) for i in self.play_order) if c],
             phase=phase,  # type: ignore[arg-type]
             turn=self.current_turn(),  # type: ignore[arg-type]

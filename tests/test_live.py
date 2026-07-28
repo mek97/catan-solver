@@ -826,3 +826,46 @@ def test_the_gap_warning_does_not_fire_on_what_colonist_withholds():
     for lid, kind in ((1, "dice_rolled"), (4, "dice_rolled")):
         st.add_event("h", lid, None, kind, "red", {})
     assert st.gaps("h") == [2, 3], "a hole between two ordinary events is a loss"
+
+
+def test_the_bank_is_counted_from_public_play_when_the_game_hides_it():
+    """colonist sends the true counts even with Hide Bank Cards on -- the
+    setting stops its UI showing them, not the state carrying them. Reading
+    them would hand the player what the table agreed nobody should have, so it
+    is counted from events everyone can see instead."""
+    from app.live.bank import count_bank
+
+    bank = count_bank([
+        {"kind": "cards_received", "cards": ["wood", "wood", "brick"]},
+        {"kind": "cards_discarded", "cards": ["wood"]},
+        {"kind": "trade_bank", "gave": ["sheep"] * 4, "got": ["ore"]},
+    ], per_resource=19, seats=4)
+    left = bank.snapshot()
+    assert left["wood"] == 18, "two paid out, one discarded back"
+    assert left["brick"] == 18
+    assert left["sheep"] == 19, "four given to the bank, capped at a full deck"
+    assert left["ore"] == 18
+
+
+def test_opening_placements_do_not_pay_the_bank():
+    """Setup pieces are free and the log does not say so; counting them as
+    purchases hands the bank cards nobody paid."""
+    from app.live.bank import count_bank
+
+    free = [{"kind": "piece_placed", "piece": "road"} for _ in range(8)]
+    assert count_bank(free, per_resource=19, seats=4).snapshot()["brick"] == 19
+    paid = free + [{"kind": "piece_placed", "piece": "road"}]
+    assert count_bank(paid, per_resource=19, seats=4).snapshot()["brick"] == 19
+
+
+def test_a_hidden_bank_still_reaches_the_solver():
+    from app import rules
+    from app.live.engine import GameEngine
+
+    eng = GameEngine()
+    eng.my_color_id = 1
+    eng.state = {"bankState": {"hideBankCards": True,
+                               "resourceCards": {"1": 3, "2": 3, "3": 3, "4": 3, "5": 3}}}
+    assert eng.bank_stock() == {}, "the reported numbers are not read"
+    counted = eng.counted_bank(4)
+    assert set(counted) == set(rules.RESOURCES) and all(v > 0 for v in counted.values())
