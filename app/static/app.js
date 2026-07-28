@@ -181,6 +181,7 @@ const STEP_LABEL = {
   play_monopoly: "play monopoly",
   trade_bank: "bank trade",
   move_robber: "move robber",
+  roll_dice: "roll the dice",
   end_turn: "end turn",
 };
 
@@ -310,7 +311,8 @@ function categorise(rec) {
     else if (goal === "buy_dev" || goal.startsWith("play_")) out.dev.push(item);
     else if (goal === "trade_bank") out.bank.push(item);
     else if (goal === "move_robber") out.robber.push(item);
-    // end_turn stays uncategorised -- "do nothing" is not an action
+    // end_turn and roll_dice stay uncategorised: neither is a choice, they
+    // are the turn moving on. Rolling gets its own prompt below.
   }
   for (const b of rec.bank_options || []) {
     out.bank.push({ score: b.score, text: b.text, why: b.why });
@@ -384,6 +386,14 @@ function renderUrgent(rec) {
   if (rec?.pending === "move_robber") {
     const best = rec.robber?.[0];
     add("move the robber", best ? best.text : "choose a hex");
+  }
+  if (rec?.pending === "roll") {
+    // a knight is the only thing that can happen first, and only sometimes
+    // is it worth it -- say which, rather than just "roll"
+    const knight = (rec.moves || []).find((m) => m.steps[0].type === "play_knight");
+    add("roll the dice", knight && knight.score > 0
+      ? `first: ${knight.location_hint}`
+      : "nothing else is available until you do");
   }
   const waiting = (rec?.offer_advice || []).filter((a) => a.verdict !== "cannot");
   if (waiting.length && !rec?.my_turn) {

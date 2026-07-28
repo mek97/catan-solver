@@ -81,9 +81,13 @@ class BoardConfig(BaseModel):
     players: dict[Color, PlayerState] = Field(default_factory=dict)
     me: MyState
     bank: Optional[dict[Resource, int]] = None  # cards left in the bank
+    # Seating order for the opening draft. Setup runs down this list and then
+    # back up it, so where you sit decides how much of the board is gone before
+    # you choose again -- see solver._draft_gap.
+    play_order: list[Color] = Field(default_factory=list)
     phase: Literal["setup1", "setup2", "main"] = "main"
     turn: Optional[Color] = None
-    pending: Optional[Literal["move_robber", "discard"]] = None
+    pending: Optional[Literal["move_robber", "discard", "roll"]] = None
 
     @model_validator(mode="after")
     def _check(self) -> "BoardConfig":
@@ -141,6 +145,7 @@ class MoveStep(BaseModel):
         "move_robber",
         "setup_settlement",
         "setup_road",
+        "roll_dice",
         "end_turn",
     ]
     vertex: Optional[int] = None

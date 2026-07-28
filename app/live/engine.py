@@ -136,6 +136,16 @@ class GameEngine:
         cur = (self.state.get("currentState") or {}).get("currentTurnPlayerColor")
         return cur == self.my_color_id
 
+    def dice_thrown(self) -> bool:
+        """Has the active player rolled yet this turn?
+
+        colonist states this outright in diceState.diceThrown, which is worth
+        preferring over inferring it from actionState: the pre-roll window is
+        short and changes the action state rarely, so a correlation over
+        recorded games sees almost none of it.
+        """
+        return bool((self.state.get("diceState") or {}).get("diceThrown"))
+
     def action_state(self) -> Optional[int]:
         return (self.state.get("currentState") or {}).get("actionState")
 
@@ -507,11 +517,16 @@ class GameEngine:
         # which it enters for everyone over the limit when a 7 is rolled --
         # note this is not gated on whose turn it is.
         action = self.action_state()
+        phase = self.phase()
         pending = None
         if action == P.ACTION_DISCARD:
             pending = "discard"
         elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
             pending = "move_robber"
+        elif phase == "main" and self.is_my_turn() and not self.dice_thrown():
+            # nothing is buildable until the dice are thrown; a knight is the
+            # one thing you may play first, and often should
+            pending = "roll"
 
         return BoardConfig(
             hexes=hexes,
@@ -533,7 +548,8 @@ class GameEngine:
                 dev_card_played_this_turn=mine_dev["played_this_turn"],
             ),
             bank=self.bank_stock() or None,
-            phase=self.phase(),  # type: ignore[arg-type]
+            play_order=[c for c in (P.map_color(i) for i in self.play_order) if c],
+            phase=phase,  # type: ignore[arg-type]
             turn=self.current_turn(),  # type: ignore[arg-type]
             pending=pending,  # type: ignore[arg-type]
         )

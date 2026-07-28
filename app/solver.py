@@ -17,6 +17,7 @@ it blocks -- see `_score_robber`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from . import board, economy, rules
 from .models import RESOURCES, BoardConfig, MoveStep, MyState, ScoredMove
@@ -831,6 +832,53 @@ def _opening_build(cards: dict[str, int]) -> tuple[float, str]:
     return 0.0, ""
 
 
+def _draft_gap(cfg: BoardConfig) -> Optional[int]:
+    """How many settlements go down between your two opening placements.
+
+    Setup runs down the seating order and then back up it, so the player who
+    picks first also picks last. Seat i of N places at position i and again at
+    2N-1-i, which leaves 2N-2i-2 placements in between: six for the first seat
+    of a four-player game, none at all for the last, who picks twice in a row.
+
+    That difference is the whole strategy of the opening. Picking first means
+    taking the best corner on the board and then choosing your second from what
+    six placements have left; picking last means choosing a *pair*, with no risk
+    that the other half is taken. A solver that ranks corners in isolation is
+    answering a question nobody is being asked.
+
+    Returns None when the seating is unknown, or when there is nothing left to
+    look ahead to.
+    """
+    order = cfg.play_order
+    if not order or cfg.me.color not in order or cfg.phase != "setup1":
+        return None
+    n = len(order)
+    return max(0, 2 * n - 2 * order.index(cfg.me.color) - 2)
+
+
+def _draft_forecast(ctx: Ctx, mine: int, gap: int) -> list[int]:
+    """The corners still open when your second pick comes round.
+
+    Rivals are assumed to take the best remaining corner each time, by the same
+    production measure we use ourselves. They will not all agree with it, but
+    "the good spots go first" is the part that matters, and being wrong about
+    *which* good spot costs far less than pretending none of them go.
+    """
+    occupied = set(ctx.occupied) | {mine}
+    open_now = [
+        v for v in range(len(board.VERTICES))
+        if board.is_vertex_placeable(v, occupied)
+    ]
+    open_now.sort(key=lambda v: -vertex_prod(ctx, v))
+    for _ in range(gap):
+        if not open_now:
+            break
+        taken = open_now.pop(0)
+        occupied.add(taken)
+        open_now = [v for v in open_now if board.is_vertex_placeable(v, occupied)]
+    return open_now
+
+
 def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     cfg = ctx.cfg
     my_p = cfg.players[cfg.me.color]
@@ -920,20 +968,83 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     # subtract and the raw figure is the projection itself. It is measured
     # against a hopeless start so the number stays positive and comparable, and
     # the projection a player actually cares about goes in the reasoning.
+    gap = _draft_gap(cfg)
     scored = []
     for m, penalty in zip(moves, overlap_penalties):
         nxt = _after(cfg, m.steps)
+        note = ""
+        if gap is not None:
+            # Judge the first placement by the pair it can still become. The
+            # corner you take is only half the decision; the other half is what
+            # survives until you choose again.
+            left = _draft_forecast(ctx, m.steps[0].vertex, gap)
+            if left:
+                partner = max(left, key=lambda v: vertex_prod(build_ctx(nxt), v))
+                nxt = _after(nxt, [MoveStep(type="setup_settlement", vertex=partner)])
+                note = (
+                    f" You pick again after {gap} more placements"
+                    if gap
+                    else " You pick again immediately, so choose both together"
+                )
+                if gap:
+                    note += (
+                        f", by when the best left looks like the "
+                        f"{board.describe_vertex(cfg.hexes, partner)}"
+                    )
+                note += "."
         after = economy.turns_to_win(nxt, build_ctx(nxt))
         scored.append(
             m.model_copy(
                 update={
                     "score": round(2 * economy.HORIZON - after - penalty, 2),
-                    "reasoning": f"{m.reasoning[:-1]}; projects a win in ~{after:.0f} turns.",
+                    "reasoning": (
+                        f"{m.reasoning[:-1]}; projects a win in ~{after:.0f} turns.{note}"
+                    ),
                 }
             )
         )
     scored.sort(key=lambda m: -m.score)
     return scored[:TOP_N]
+
+
+def _pre_roll_moves(ctx: Ctx) -> list[ScoredMove]:
+    """Before the dice, a knight is the only card you may play -- and the only
+    moment it can save you anything.
+
+    Playing it after the roll cannot stop the 7 that has already happened. If
+    the robber is sitting on your own best hex, moving it first means the roll
+    pays you; that is worth more than the same knight played later, and it is
+    the one decision this phase actually contains.
+    """
+    cfg = ctx.cfg
+    knights: list[ScoredMove] = []
+    if not cfg.me.dev_card_played_this_turn and cfg.me.dev_cards.knight >= 1:
+        knights = _score_robber(ctx, _robber_moves(ctx, step_type="play_knight"))
+    # every hex is a knight placement, so the list is long enough to push the
+    # roll off the end -- and rolling is what happens on almost every turn
+    out: list[ScoredMove] = knights[: TOP_N - 1]
+    blocked = any(
+        cfg.robber_hex in board.VERTEX_HEXES[v]
+        for v in ctx.my_buildings
+    )
+    out.append(
+        ScoredMove(
+            steps=[MoveStep(type="roll_dice")],
+            score=0.0,
+            reasoning=(
+                "Roll the dice -- nothing else is available until you do."
+                + (
+                    " The robber is on one of your hexes: a knight played now"
+                    " frees it before the roll pays out."
+                    if blocked and cfg.me.dev_cards.knight >= 1
+                    else ""
+                )
+            ),
+            location_hint="roll the dice",
+        )
+    )
+    out.sort(key=lambda m: -m.score)
+    return out[:TOP_N]
 
 
 def _after(cfg: BoardConfig, steps: list[MoveStep]) -> BoardConfig:
@@ -1063,6 +1174,8 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
         return _score_robber(ctx, _robber_moves(ctx))[:TOP_N]
     if cfg.phase in ("setup1", "setup2"):
         return _setup_moves(ctx)
+    if cfg.pending == "roll":
+        return _pre_roll_moves(ctx)
 
     # Two stages, and the order between them matters. Generation scores in
     # weighted pips: good enough to decide what is worth considering, and to
