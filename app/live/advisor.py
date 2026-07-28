@@ -12,6 +12,7 @@ from typing import Any, Optional
 from .. import board, economy, solver
 from ..models import RESOURCES, BoardConfig, ScoredMove
 from .engine import GameEngine
+from .trades import RESPONSE_ACCEPT as TRADE_ACCEPTED, RESPONSE_DECLINE as TRADE_DECLINED
 
 from .. import rules
 
@@ -224,10 +225,32 @@ def _fmt(c: Counter) -> str:
 
 
 def offer_advice(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
-    """Verdicts for every open offer that isn't ours."""
+    """Verdicts for every open offer that is ours to answer.
+
+    An offer stays on the table after you answer it, waiting on the player who
+    made it, and colonist records your reply on it. Re-advising one you have
+    already accepted or declined asks you to decide something twice and hides
+    the fact that the trade is simply in progress -- so an answered offer is
+    reported as waiting rather than as a choice.
+    """
     out = []
     for offer in eng.trade_offers():
         if offer.get("from_me"):
+            continue
+        answered = offer.get("my_response") in (TRADE_ACCEPTED, TRADE_DECLINED)
+        if answered:
+            out.append({
+                "id": offer.get("id"),
+                "from": offer.get("from"),
+                "verdict": "waiting",
+                "score": 0.0,
+                "text": (
+                    f"You accepted — waiting on {offer.get('from')}."
+                    if offer.get("my_response") == TRADE_ACCEPTED
+                    else f"You declined {offer.get('from')}'s offer."
+                ),
+                "offer": offer,
+            })
             continue
         ev = evaluate_offer(eng, cfg, offer)
         ev["offer"] = offer

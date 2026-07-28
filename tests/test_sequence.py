@@ -197,3 +197,59 @@ def test_only_one_development_card_a_turn():
                     "played_this_turn": True}
 
     assert dev_card_plays(Eng(), played) == []
+
+
+# --- a played card runs to the end of its action -----------------------------
+
+
+def test_a_knight_keeps_advising_through_the_steal():
+    """Playing a knight is three steps, and the card leaves your hand on the
+    first. Traced live: state 24 (move it) -> 27 (pick a victim) -> 0. Without
+    the third, the advice stopped halfway through the action it started."""
+    from test_economy import _settle, _spread
+    from test_solver import load as _load
+
+    cfg = _load(phase="main", pending="steal")
+    for color, v in zip(("red", "blue", "orange"), _spread(cfg, 3)):
+        _settle(cfg, color, v)
+    cfg.robber_hex = board.VERTEX_HEXES[cfg.players["blue"].settlements[0]][0]
+    cfg.players["blue"].resource_count = 7
+    cfg.players["blue"].vp_visible = 8
+    cfg.players["orange"].resource_count = 2
+
+    moves = solver.solve(cfg)
+    assert moves and all(m.steps[0].type == "steal" for m in moves)
+    assert moves[0].steps[0].steal_from == "blue", "adjacent, holding cards, closest to winning"
+
+
+def test_nobody_worth_robbing_still_says_so():
+    from test_economy import _settle, _spread
+    from test_solver import load as _load
+
+    cfg = _load(phase="main", pending="steal")
+    for color, v in zip(("red", "blue"), _spread(cfg, 2)):
+        _settle(cfg, color, v)
+    cfg.robber_hex = board.VERTEX_HEXES[cfg.players["red"].settlements[0]][0]
+    moves = solver.solve(cfg)
+    assert moves and moves[0].steps[0].steal_from is None
+
+
+def test_an_offer_you_answered_is_not_asked_again():
+    """It stays on the table waiting on the player who made it. Re-advising it
+    asks you to decide the same thing twice and hides that it is in progress."""
+    from app.live.advisor import offer_advice
+
+    class Eng:
+        def trade_offers(self):
+            return [
+                {"id": "a", "from": "blue", "from_me": False, "my_response": 1,
+                 "offers": ["ore"], "wants": ["sheep"]},
+                {"id": "b", "from": "green", "from_me": False, "my_response": 0,
+                 "offers": ["wood"], "wants": ["brick"]},
+            ]
+
+    cfg = _seated(0, phase="main")
+    cfg.me.hand = {"sheep": 2, "brick": 2}
+    verdicts = {a["id"]: a["verdict"] for a in offer_advice(Eng(), cfg)}
+    assert verdicts["a"] == "waiting", "already accepted -- in progress"
+    assert verdicts["b"] != "waiting", "unanswered -- still a decision"

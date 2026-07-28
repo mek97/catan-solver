@@ -333,6 +333,11 @@ function categorise(rec) {
   }
   for (const a of rec.offer_advice || []) {
     const o = a.offer || {};
+    // one you have already answered is in progress, not a decision
+    if (a.verdict === "waiting") {
+      out.incoming.push({ score: -1, tag: "sent", text: a.text, why: null });
+      continue;
+    }
     out.incoming.push({
       score: a.score ?? 0, tag: a.verdict,
       text: `${o.from ?? "?"}: give ${(o.wants || []).join(", ") || "?"} → get ${(o.offers || []).join(", ") || "?"}`,

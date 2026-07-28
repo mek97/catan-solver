@@ -590,6 +590,11 @@ class GameEngine:
             pending = "discard"
         elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
             pending = "move_robber"
+        elif action == P.ACTION_STEAL and self.is_my_turn():
+            # Playing a knight is three steps -- play it, move the robber,
+            # then pick whom to rob -- and the card leaves your hand on the
+            # first, so the advice used to stop there. This is the third.
+            pending = "steal"
         elif self.is_my_turn() and (
             action in P.ACTION_ROAD_BUILDING or self.free_roads > 0
         ):

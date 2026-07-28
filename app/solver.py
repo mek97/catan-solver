@@ -1027,6 +1027,47 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     return scored[:TOP_N]
 
 
+def _steal_moves(ctx: Ctx) -> list[ScoredMove]:
+    """Whom to rob, once the robber has landed.
+
+    The card is already spent and the hex already chosen, so what is left is a
+    single question: of the players touching this hex, who hurts most for
+    losing a card. The front-runner, mostly -- a card taken from whoever is
+    furthest behind changes nothing about who wins -- and among equals the one
+    holding most, since that is the best chance of taking something they need.
+    """
+    cfg = ctx.cfg
+    contest = race(cfg)
+    hid = cfg.robber_hex
+    out = []
+    for color, p in cfg.players.items():
+        if color == cfg.me.color or not p.resource_count:
+            continue
+        if not any(hid in board.VERTEX_HEXES[v] for v in p.settlements + p.cities):
+            continue
+        # closer to winning is worth more; theirs is the clock that binds
+        threat = contest["turns"].get(color, economy.LOST)
+        urgency = _clamp((economy.LOST - threat) / economy.LOST, 0.0, 1.0)
+        out.append(
+            ScoredMove(
+                steps=[MoveStep(type="steal", steal_from=color, robber_hex=hid)],
+                score=round(4.0 * urgency + 0.1 * p.resource_count, 2),
+                reasoning=(
+                    f"{color} holds {p.resource_count} cards and needs about "
+                    f"{threat:.0f} more turns to win"
+                    + (" -- the closest of anyone here." if color == contest["leader"] else ".")
+                ),
+                location_hint=f"steal from {color}",
+            )
+        )
+    out.sort(key=lambda m: -m.score)
+    return out or [
+        ScoredMove(steps=[MoveStep(type="steal", robber_hex=hid)], score=0.0,
+                   reasoning="Nobody on this hex is holding a card.",
+                   location_hint="no one to steal from")
+    ]
+
+
 def _free_road_moves(ctx: Ctx) -> list[ScoredMove]:
     """Where to put a road you are not paying for.
 
@@ -1346,6 +1387,8 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
         return _pre_roll_moves(ctx)
     if cfg.pending == "place_road":
         return _free_road_moves(ctx)
+    if cfg.pending == "steal":
+        return _steal_moves(ctx)
 
     # Two stages, and the order between them matters. Generation scores in
     # weighted pips: good enough to decide what is worth considering, and to
