@@ -58,6 +58,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "catanatron" },
     { name = "fastapi" },
     { name = "msgpack" },
     { name = "pydantic" },
@@ -76,6 +77,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic" },
+    { name = "catanatron", specifier = ">=3.2.1" },
     { name = "fastapi" },
     { name = "msgpack", specifier = ">=1.2.1" },
     { name = "pydantic", specifier = ">=2" },
@@ -89,6 +91,18 @@ requires-dist = [
 dev = [
     { name = "httpx" },
     { name = "pytest" },
+]
+
+[[package]]
+name = "catanatron"
+version = "3.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "networkx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/d3/419657bf8134387f343b8f33a9b97101399c87317bb58e4ccbcb765e5820/catanatron-3.2.1.tar.gz", hash = "sha256:1d33e3e53fcd4d8f50914d3b9388f172fbd3fdb179cd6bf6af4857756ca8a22f", size = 35201, upload-time = "2022-07-17T23:03:18.637Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/eb/4bae0c3bcb6ae16f0c965b65c9ac87aca39629925884f82c55961ec213ec/catanatron-3.2.1-py3-none-any.whl", hash = "sha256:92bf5c114b6e47588ba1bf5b7d0b11f9f20d142bdc47cf787206c1ee5c506a36", size = 35041, upload-time = "2022-07-17T23:03:16.967Z" },
 ]
 
 [[package]]
@@ -474,6 +488,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/e1/aab6c946570496b78e67804721f3d5e2d62a93081b9b37df77764ef56347/msgpack-1.2.1-cp314-cp314t-win32.whl", hash = "sha256:c1c79a604a2969a868a78b6ebd27a887e00c624f14f66b3038e0590cb23332d1", size = 70914, upload-time = "2026-06-18T16:13:49.385Z" },
     { url = "https://files.pythonhosted.org/packages/13/0a/e608956488a2af014cfe6e3d665e090b8ee42aa14b07f8f95b8880d66b09/msgpack-1.2.1-cp314-cp314t-win_amd64.whl", hash = "sha256:f12038a35fabd52e56a3547bab42401af49a45caa6dd00b34c44de235bc93ee2", size = 77999, upload-time = "2026-06-18T16:13:50.467Z" },
     { url = "https://files.pythonhosted.org/packages/d2/8a/27e2e57055176e366a46b85d02d68e7a5bcfbdd8474c9706375d965f24d3/msgpack-1.2.1-cp314-cp314t-win_arm64.whl", hash = "sha256:0adcf06ffde0777c0e1a9b771a2b1c4226ba1bbf748c8efcc02fcdeca3299107", size = 71160, upload-time = "2026-06-18T16:13:51.498Z" },
+]
+
+[[package]]
+name = "networkx"
+version = "3.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/51/63fe664f3908c97be9d2e4f1158eb633317598cfa6e1fc14af5383f17512/networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509", size = 2517025, upload-time = "2025-12-08T17:02:39.908Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl", hash = "sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762", size = 2068504, upload-time = "2025-12-08T17:02:38.159Z" },
 ]
 
 [[package]]
