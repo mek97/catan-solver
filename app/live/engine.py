@@ -614,7 +614,13 @@ class GameEngine:
         action = self.action_state()
         phase = self.phase()
         pending = None
-        owed = self.setup_road_owed() if phase != "main" else None
+        # Not gated on the phase. Placing the second settlement takes the
+        # count to two and the phase reads "main" immediately, while colonist
+        # is still asking for the road that comes with it -- so the first
+        # placement was covered and the second was not. A settlement of ours
+        # with no road of ours attached cannot occur outside setup anyway: in
+        # the main game you can only build one where a road already reaches.
+        owed = self.setup_road_owed()
         if owed is not None and self.is_my_turn():
             pending = "setup_road"
         elif action == P.ACTION_DISCARD:

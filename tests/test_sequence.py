@@ -289,3 +289,37 @@ def test_the_engine_spots_a_settlement_with_no_road():
     eng.maps["edges"] = {"3": attached}
     eng.state["mapState"]["tileEdgeStates"] = {"3": {"owner": 1}}
     assert eng.setup_road_owed() is None, "settled and connected -- nothing owed"
+
+
+def test_the_second_opening_road_is_shown_too():
+    """Reported live: it worked for the first settlement and not the second.
+
+    Placing the second takes the count to two, so the phase reads "main"
+    immediately -- while colonist is still asking for the road that comes with
+    it. Gating the check on the phase covered one placement and missed the one
+    after it.
+    """
+    eng = GameEngine()
+    eng.my_color_id = 1
+    v1, v2 = 7, 20
+    attached = board.VERTEX_EDGES[v1][0]
+    eng.maps = {"corners": {"a": v1, "b": v2}, "edges": {"x": attached}, "hexes": {}}
+    eng.state = {
+        "mapState": {
+            "tileCornerStates": {"a": {"owner": 1}, "b": {"owner": 1}},
+            "tileEdgeStates": {"x": {"owner": 1}},
+        },
+        "playerStates": {str(i): {} for i in (1, 2, 3, 4)},
+    }
+    assert eng.phase() == "main", "two settlements down: the phase has moved on"
+    assert eng.setup_road_owed() == v2, "the road for the second one is still owed"
+
+
+def test_a_settled_and_connected_board_owes_nothing():
+    eng = GameEngine()
+    eng.my_color_id = 1
+    v = 7
+    eng.maps = {"corners": {"a": v}, "edges": {"x": board.VERTEX_EDGES[v][0]}, "hexes": {}}
+    eng.state = {"mapState": {"tileCornerStates": {"a": {"owner": 1}},
+                              "tileEdgeStates": {"x": {"owner": 1}}}}
+    assert eng.setup_road_owed() is None
