@@ -251,13 +251,19 @@ def dev_card_plays(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
     conditional rather than pretending to know what we hold.
     """
     mine = eng.my_dev_cards()
-    if not mine["count"]:
-        return []
+    if not mine["count"] or mine["played_this_turn"]:
+        return []   # one card per turn, and colonist says whether we used it
+
+    # What we may play now, which is not the same as what we hold: a card
+    # cannot be played the turn it is bought. Reading the whole hand here and
+    # then clearing the restrictions produced a confident "play your knight"
+    # for a knight bought moments earlier, which colonist then refused.
+    playable = mine["playable"]
     certain = bool(mine["known"]) and not mine["hidden"]
 
     out: list[dict[str, Any]] = []
     for kind in ("knight", "road_building", "year_of_plenty", "monopoly"):
-        have = mine["known"].get(kind, 0)
+        have = playable.get(kind, 0)
         if certain and not have:
             continue
         probe = cfg.model_copy(deep=True)

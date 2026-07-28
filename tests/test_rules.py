@@ -344,3 +344,37 @@ def test_you_win_with_ten_or_more_not_exactly_ten():
     me.longest_road = True                          # +2 -> 11, not exactly 10
     assert solver.build_ctx(cfg).my_vp == 11
     assert economy.turns_to_win(cfg, solver.build_ctx(cfg)) == 0.0, "11 points wins"
+
+
+def test_a_card_bought_this_turn_is_not_offered_as_a_play():
+    """Reported live: the app suggested playing a knight bought that turn, and
+    colonist refused it. dev_card_plays read the whole hand and then cleared
+    the restrictions it was meant to respect."""
+    from app.live.advisor import dev_card_plays
+    from app.live.engine import GameEngine
+
+    class Eng(GameEngine):
+        def my_dev_cards(self):
+            return {"count": 2, "known": {"knight": 1, "road_building": 1},
+                    "hidden": 0, "used": 0,
+                    "bought_this_turn": {"knight": 1},
+                    "playable": {"road_building": 1},
+                    "played_this_turn": False}
+
+    cfg = _mid_game()
+    kinds = {d["card"] for d in dev_card_plays(Eng(), cfg)}
+    assert "knight" not in kinds, "bought this turn -- not playable yet"
+    assert "road_building" in kinds
+
+
+def test_nothing_is_offered_once_a_card_has_been_played():
+    from app.live.advisor import dev_card_plays
+    from app.live.engine import GameEngine
+
+    class Eng(GameEngine):
+        def my_dev_cards(self):
+            return {"count": 1, "known": {"knight": 1}, "hidden": 0, "used": 1,
+                    "bought_this_turn": {}, "playable": {"knight": 1},
+                    "played_this_turn": True}
+
+    assert dev_card_plays(Eng(), _mid_game()) == []

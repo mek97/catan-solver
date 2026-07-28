@@ -356,18 +356,38 @@ function categorise(rec) {
   return out;
 }
 
+const DEV_LABEL = {
+  knight: "knight", road_building: "road building",
+  year_of_plenty: "year of plenty", monopoly: "monopoly", victory_point: "point",
+};
+
 function renderHand(rec) {
   const strip = $("#hand-strip");
   strip.replaceChildren();
   const hand = rec?.hand || {};
   const held = Object.entries(hand).filter(([, n]) => n > 0);
-  if (!held.length) {
-    strip.innerHTML = '<span class="hcard empty">no cards</span>';
-    return;
+  strip.innerHTML = held.length
+    ? held.map(([r, n]) => `<span class="hcard ${r}">${n} ${RES_ABBR[r] || r}</span>`).join("")
+    : '<span class="hcard empty">no cards</span>';
+
+  // Development cards were never shown at all. Buy one and it vanished: the
+  // card is unplayable the turn it is bought, so the Dev Card row correctly
+  // said "nothing available", and with the card itself invisible that reads as
+  // the card having been lost.
+  const dev = rec?.my_dev;
+  if (!dev?.count) return;
+  const fresh = dev.bought_this_turn || {};
+  const chips = [];
+  for (const [card, n] of Object.entries(dev.known || {})) {
+    const pending = fresh[card] || 0;
+    if (n - pending > 0) chips.push(`<span class="dcard">${n - pending} ${DEV_LABEL[card] || card}</span>`);
+    if (pending) chips.push(
+      `<span class="dcard fresh" title="a card cannot be played the turn it is bought">` +
+      `${pending} ${DEV_LABEL[card] || card} · next turn</span>`);
   }
-  strip.innerHTML = held
-    .map(([r, n]) => `<span class="hcard ${r}">${n} ${RES_ABBR[r] || r}</span>`)
-    .join("");
+  if (dev.hidden) chips.push(`<span class="dcard unknown">${dev.hidden} face down</span>`);
+  if (dev.played_this_turn) chips.push('<span class="dcard spent">card played this turn</span>');
+  strip.insertAdjacentHTML("beforeend", `<span class="dev-sep"></span>` + chips.join(""));
 }
 
 function renderUrgent(rec) {
