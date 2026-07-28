@@ -779,3 +779,31 @@ def test_a_new_game_does_not_inherit_the_last_one_s_history():
     # a different table entirely
     eng.apply_snapshot(snap(5, [{"userId": "zzz", "selectedColor": 1}]))
     assert eng.dice_history() == [10], "the old game's rolls must not survive"
+
+
+def test_a_refresh_repairs_a_log_with_holes_in_it():
+    """A snapshot carries the log from id 0, so reloading the tab is not just
+    survivable -- it is how a feed that dropped frames puts itself right."""
+    src = replay()
+    full = {
+        str(i): {"text": {"type": 10, "playerColor": 1,
+                          "firstDice": 1 + i % 6, "secondDice": 1 + (i * 2) % 6}}
+        for i in range(12)
+    }
+    roster = [{"userId": "a", "selectedColor": 1}]
+
+    def snap(log):
+        return {"gameState": {**src.state, "gameLogState": log},
+                "playerColor": src.my_color_id, "playOrder": src.play_order,
+                "playerUserStates": roster}
+
+    eng = GameEngine()
+    eng.apply_snapshot(snap({k: v for k, v in full.items() if int(k) < 3}))
+    for k, v in full.items():          # a lossy stream: half the diffs arrive
+        if int(k) >= 3 and int(k) % 2 == 0:
+            eng.apply_diff({"gameLogState": {k: v}})
+    assert len(eng.events) < 12
+
+    eng.apply_snapshot(snap(full))     # the tab reloads
+    assert len(eng.events) == 12
+    assert len({e["log_id"] for e in eng.events}) == 12, "and nothing arrives twice"
