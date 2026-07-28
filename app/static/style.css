@@ -578,3 +578,12 @@ main { display: flex; height: calc(100vh - var(--dock-h)); }
 #log .roll { color: var(--dim); }
 
 .hidden { display: none !important; }
+
+/* the engine leading, with our own answer demoted to a line beneath it */
+.hero-engine .hero-act { font-size: 19px; }
+.hero-alt {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule);
+  font: 400 11.5px/1.5 var(--mono); color: var(--faint);
+}
+.eng-tag.deal { background: rgba(185,140,240,.18); color: var(--deal); }
+.eng-tag.off { background: none; border: 1px dashed var(--rule); color: var(--faint); }

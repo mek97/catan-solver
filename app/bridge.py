@@ -344,12 +344,27 @@ def describe(cfg, action) -> dict[str, Any]:
             ours["robber_hex"] = hid
             where = board.describe_hex(cfg.hexes, hid)
 
+    # Shaped like one of our own moves, so the board can highlight it exactly
+    # as it highlights our advice. An answer you cannot see on the board is an
+    # answer you still have to go and find.
+    step_type = STEP.get(kind)
+    steps = [{"type": step_type, **ours}] if step_type else []
+
     return {
         "action": kind,
         "where": where,
         "text": (VERB.get(kind, kind.replace("_", " ").lower()) + (f" — {where}" if where else "")),
+        "steps": steps,
         **ours,
     }
+
+
+STEP = {
+    "BUILD_SETTLEMENT": "build_settlement",
+    "BUILD_CITY": "build_city",
+    "BUILD_ROAD": "build_road",
+    "MOVE_ROBBER": "move_robber",
+}
 
 
 VERB = {

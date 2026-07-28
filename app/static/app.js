@@ -725,6 +725,40 @@ function renderPrimary(rec, groups) {
     return idle("Nothing may be traded or built until the dice are rolled.");
   }
 
+  /* The searching engine leads where it can.
+     Measured over the recorded games, across positions with three or more
+     legal moves: it chose to end the turn 0 times out of 17; we chose to sit
+     still 7 times. Our ladder prices a move by the turns it saves, and a road
+     that only opens a corner saves nothing today, so it scores negative and we
+     pass -- in a position where passing is almost never right. That is a
+     valuation gap, not a close judgement call, so its answer goes first and
+     ours goes underneath.
+     It cannot see player trades at all, which is why ours is still shown
+     rather than dropped: a good trade is a real move it never considered. */
+  const eng = rec?.engine;
+  if (eng && rec?.my_turn) {
+    box.innerHTML = `
+      <div class="hero hero-engine" style="--cat:var(--bank)">
+        <div class="hero-top">
+          <span class="hero-cat">engine · depth ${eng.depth}</span>
+          <span class="hero-score">${eng.legal_moves} legal</span>
+        </div>
+        <div class="hero-act"></div>
+        ${best ? '<div class="hero-alt"></div>' : ""}
+      </div>`;
+    box.querySelector(".hero-act").textContent = eng.text;
+    if (best) {
+      const s = (best.item.score ?? 0);
+      box.querySelector(".hero-alt").textContent =
+        `ours: ${best.cat.name.toLowerCase()} — ${best.item.text} (${s > 0 ? "+" : ""}${s.toFixed(1)})`;
+    }
+    state.heroMove = eng.steps?.length ? { steps: eng.steps } : null;
+    // remembered so the row below does not repeat a trade already named here
+    state.heroAlt = best?.cat.key || null;
+    return;
+  }
+  state.heroAlt = null;
+
   if (!best) {
     if (pass || rec) idle("Nothing available — bank your cards.");
     else box.innerHTML = `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
@@ -738,10 +772,12 @@ function renderPrimary(rec, groups) {
   // for itself and nothing forces your hand, the answer is to do nothing, and
   // the least-bad option is reported as what it is.
   if ((best.item.score ?? 0) <= 0 && !mustAct(rec, best.item)) {
-    const cost = Math.abs(best.item.score ?? 0).toFixed(1);
+    const s = best.item.score ?? 0;
+    const cost = Math.abs(s).toFixed(1);
     idle(
       `Nothing pays for itself right now. Closest is ${best.cat.name.toLowerCase()}: ` +
-      `${best.item.text} — and that costs you ${cost} turns.`
+      `${best.item.text} — and that ` +
+      (cost === "0.0" ? "gains you nothing." : `costs you ${cost} turns.`)
     );
     return;
   }
@@ -957,20 +993,30 @@ function renderPanel(rec) {
   renderIntel(rec);
 }
 
-// catanatron's answer, beside ours. Agreement is reassuring; disagreement is
-// the interesting case, which is why it is shown even when it differs.
+// When the engine is leading, this row carries what it cannot see: the player
+// trades. When it is unavailable -- a 5-6 player board -- it says so, because
+// "no second opinion" and "they agree" must not look the same.
 function renderEngine(rec) {
   const box = $("#engine");
-  const e = rec?.engine;
   if (!box) return;
-  if (!e) { box.classList.add("hidden"); return; }
+  const e = rec?.engine;
+  if (!e) {
+    if (!rec) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    box.innerHTML =
+      `<span class="eng-tag off">ours only</span>` +
+      `<span class="eng-text">no engine for this board — 5-6 players is beyond it</span>`;
+    return;
+  }
+  const deal = (rec.proposals || []).find((p) => (p.score ?? 0) > 0);
+  // the hero already named it as ours; saying it twice is not emphasis
+  if (!deal || state.heroAlt === "offer") { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  const ours = state.heroMove?.location_hint || "";
-  const agrees = ours && e.where && ours.includes(e.where.slice(0, 18));
   box.innerHTML =
-    `<span class="eng-tag${agrees ? " agrees" : ""}">${agrees ? "agrees" : "engine"}</span>` +
-    `<span class="eng-text">${e.text}</span>` +
-    `<span class="eng-meta">${e.legal_moves} legal · depth ${e.depth}</span>`;
+    `<span class="eng-tag deal">trade</span>` +
+    `<span class="eng-text"></span>` +
+    `<span class="eng-meta">the engine cannot see this</span>`;
+  box.querySelector(".eng-text").textContent = deal.text;
 }
 
 const PLAN_LABEL = {
