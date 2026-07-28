@@ -761,3 +761,21 @@ def test_re_reading_the_same_log_does_not_double_count():
     eng.apply_snapshot(payload)
     eng.apply_snapshot(payload)
     assert eng.dice_history() == [4]
+
+
+def test_a_new_game_does_not_inherit_the_last_one_s_history():
+    """Snapshots carry history, so it has to be dropped when the game changes
+    or the previous match's events get re-filed under the new one."""
+    src = replay()
+    def snap(roll, roster):
+        return {"gameState": {**src.state, "gameLogState": {
+                    "1": {"text": {"type": 10, "playerColor": 1,
+                                   "firstDice": roll, "secondDice": roll}}}},
+                "playerColor": src.my_color_id, "playOrder": src.play_order,
+                "playerUserStates": roster}
+    eng = GameEngine()
+    eng.apply_snapshot(snap(3, [{"userId": "a", "selectedColor": 1}]))
+    assert eng.dice_history() == [6]
+    # a different table entirely
+    eng.apply_snapshot(snap(5, [{"userId": "zzz", "selectedColor": 1}]))
+    assert eng.dice_history() == [10], "the old game's rolls must not survive"

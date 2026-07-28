@@ -85,7 +85,12 @@ class GameEngine:
         # demonstrably a different game.
         key = _game_key(payload)
         if self.game_key is not None and key != self.game_key:
+            # a genuinely new game: the previous one's history is not ours to
+            # carry forward, and re-filing it under the new game would date
+            # every event in it to the wrong match
             self.trade_memory = TradeMemory()
+            self.events = []
+            self._seen_log_ids = set()
         self.game_key = key
         self.trade_memory.observe(
             self.state.get("tradeState") or {}, self.my_color_id, P.map_color
