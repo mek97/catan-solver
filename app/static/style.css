@@ -316,6 +316,21 @@ main { display: flex; height: 100vh; }
 .pnum b { color: var(--dim); margin-right: 2px; }
 .pnum.hot b { color: var(--rob); }
 
+/* the route to ten points */
+#intel-plan { border-top: 1px solid var(--line, rgba(255,255,255,.08)); }
+#intel-plan > summary { cursor: pointer; font: 600 10px var(--mono); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--faint); padding: 8px 12px; }
+#plan { padding: 0 12px 10px; }
+.plan-head { display: flex; justify-content: space-between; align-items: baseline;
+  font: 600 11px var(--mono); color: var(--dim); margin-bottom: 6px; }
+.plan-eta { color: var(--faint); }
+.plan-step { display: grid; grid-template-columns: 46px 74px 22px 1fr; gap: 6px;
+  align-items: baseline; font: 400 11px var(--mono); padding: 2px 0; }
+.plan-at { color: var(--faint); }
+.plan-kind { color: var(--dim); font-weight: 600; }
+.plan-vp { color: #8fc63f; }
+.plan-where { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* what a player has actually done at the trade table */
 .ptrade { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 5px;
   padding-top: 5px; border-top: 1px dashed rgba(255,255,255,.08); }

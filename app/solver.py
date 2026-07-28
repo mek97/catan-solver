@@ -1,16 +1,25 @@
-"""Heuristic Catan move recommender.
+"""Catan move recommender.
 
-Single-turn evaluation, no lookahead: the user re-runs Solve every turn, so
-long-horizon intent lives in the reasoning strings, not a search tree. Scores
-are in "weighted pips" -- a build yielding ~1 extra card every ~7 rolls scores
-around 5. All tunable weights live in W.
+Two stages, deliberately separated. This module *generates* candidate moves --
+what is legal, affordable, and worth a second look -- using cheap board
+heuristics (pips, scarcity, reachability) tuned by W. Then `app.economy` prices
+each one by applying it and asking how much sooner the game is won.
+
+That split is the whole design. Heuristics are good at "is this worth
+considering" and bad at "is this better than that", because a number in
+weighted pips cannot be compared to a victory point. So nothing here ranks
+anything: a move's score is the turns it takes off the race to ten points,
+which is the only currency the game actually settles in.
+
+The one exception is the robber, which is priced in turns added to the people
+it blocks -- see `_score_robber`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import board, rules
-from .models import RESOURCES, BoardConfig, MoveStep, ScoredMove
+from . import board, economy, rules
+from .models import RESOURCES, BoardConfig, MoveStep, MyState, ScoredMove
 
 # production odds exclude 7 -- it pays nobody, it moves the robber
 PIPS = {k: v for k, v in rules.PIPS.items() if k != 7}
@@ -25,6 +34,17 @@ W = {
 }
 
 TOP_N = 8
+
+# Two settlements on the same number boom and bust together, and the turns
+# model averages that difference away -- it sees expected cards, not the
+# variance. Charged here in turns per overlapping pip.
+OVERLAP_TURNS = 0.12
+
+# Most a single robber placement may be credited with costing one opponent.
+# Blocking the only hex of a thin position can look like it ends their game,
+# and without a ceiling a knight outscores every build on the board. The
+# robber also only sits there until the next 7, which no delta reflects.
+ROBBER_CAP = 4.0
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -814,6 +834,7 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
             if cfg.hexes[h].number is not None:
                 first_numbers.add(cfg.hexes[h].number)
     moves = []
+    overlap_penalties: list[float] = []
     for vid in range(54):
         if not board.is_vertex_placeable(vid, ctx.occupied):
             continue
@@ -879,16 +900,160 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
                 score=score,
                 reasoning="Setup placement: " + "; ".join(bits) + ".",
                 location_hint=hint,
+                # carried so the rescoring below can charge it; the turns model
+                # works in expectations and cannot see correlated numbers
             )
         )
-    moves.sort(key=lambda m: -m.score)
-    return moves[:TOP_N]
+        overlap_penalties.append(OVERLAP_TURNS * sum(PIPS.get(n, 0) for n in shared))
+
+    # Rank openings by the game they lead to, not by the corner in isolation.
+    # An opening is only ever worth the race it sets up.
+    #
+    # Every candidate starts from the same position, so there is no "before" to
+    # subtract and the raw figure is the projection itself. It is measured
+    # against a hopeless start so the number stays positive and comparable, and
+    # the projection a player actually cares about goes in the reasoning.
+    scored = []
+    for m, penalty in zip(moves, overlap_penalties):
+        nxt = _after(cfg, m.steps)
+        after = economy.turns_to_win(nxt, build_ctx(nxt))
+        scored.append(
+            m.model_copy(
+                update={
+                    "score": round(2 * economy.HORIZON - after - penalty, 2),
+                    "reasoning": f"{m.reasoning[:-1]}; projects a win in ~{after:.0f} turns.",
+                }
+            )
+        )
+    scored.sort(key=lambda m: -m.score)
+    return scored[:TOP_N]
+
+
+def _after(cfg: BoardConfig, steps: list[MoveStep]) -> BoardConfig:
+    """The position a move leaves behind.
+
+    Built by copy-and-mutate rather than by re-validating: a candidate is
+    already known to be legal, and BoardConfig's validator is the expensive
+    part of building one.
+    """
+    nxt = cfg.model_copy(deep=True)
+    me = nxt.players[nxt.me.color]
+    hand = {r: nxt.me.hand.get(r, 0) for r in RESOURCES}
+
+    def pay(cost: dict[str, int]) -> None:
+        for r, n in cost.items():
+            hand[r] = hand.get(r, 0) - n
+
+    for s in steps:
+        if s.type in ("build_settlement", "setup_settlement"):
+            if s.vertex is not None:
+                me.settlements.append(s.vertex)
+            if s.type == "build_settlement":
+                pay(COSTS["settlement"])
+        elif s.type == "build_city":
+            if s.vertex is not None:
+                if s.vertex in me.settlements:
+                    me.settlements.remove(s.vertex)
+                me.cities.append(s.vertex)
+            pay(COSTS["city"])
+        elif s.type in ("build_road", "setup_road"):
+            if s.edge is not None:
+                me.roads.append(s.edge)
+            if s.type == "build_road":
+                pay(COSTS["road"])
+        elif s.type == "buy_dev":
+            pay(COSTS["dev"])
+            me.dev_card_count += 1
+        elif s.type == "play_road_building":
+            me.roads.extend(s.edges or [])
+        elif s.type == "play_knight":
+            me.knights_played += 1
+            nxt.me.dev_cards.knight = max(0, nxt.me.dev_cards.knight - 1)
+            if s.robber_hex is not None:
+                nxt.robber_hex = s.robber_hex
+        elif s.type == "move_robber":
+            if s.robber_hex is not None:
+                nxt.robber_hex = s.robber_hex
+        elif s.type in ("trade_bank", "play_year_of_plenty", "play_monopoly"):
+            for r, n in (s.give or {}).items():
+                hand[r] = hand.get(r, 0) - n
+            for r, n in (s.get or {}).items():
+                hand[r] = hand.get(r, 0) + n
+
+    nxt.me.hand = {r: max(0, n) for r, n in hand.items()}
+    if any(s.type in ("build_road", "setup_road", "play_road_building") for s in steps):
+        # the reported longest road is now stale; force a recount
+        me.longest_road_len = None
+    return nxt
+
+
+def _turns_saved(cfg: BoardConfig, base: float, move: ScoredMove) -> float:
+    """What a move is worth: the turns it takes off the race to 10 points."""
+    nxt = _after(cfg, move.steps)
+    return base - economy.turns_to_win(nxt, build_ctx(nxt))
+
+
+def _opponent_turns(cfg: BoardConfig, color: str) -> float:
+    """Turns the given opponent needs, judged the same way we judge ourselves.
+
+    Their hand is hidden, so it is taken as empty. That understates them by a
+    turn or two, but the robber cares about the *difference* an obstruction
+    makes, and a constant bias cancels out of a difference.
+    """
+    view = cfg.model_copy(deep=True)
+    view.me = MyState(color=color, hand={})
+    return economy.turns_to_win(view, build_ctx(view))
+
+
+def _score_robber(ctx: Ctx, moves: list[ScoredMove]) -> list[ScoredMove]:
+    """Re-price robber placements as turns taken off opponents, not pips.
+
+    Blocking a hex is only ever worth what it costs the people it blocks, so
+    the measure is their own turns-to-win, recomputed with the robber sitting
+    on it. Cheap because a placement can only affect the players who have
+    built on that hex.
+    """
+    cfg = ctx.cfg
+    me = cfg.me.color
+    others = [c for c in cfg.players if c != me]
+    if not others:
+        return moves
+    baseline = {c: _opponent_turns(cfg, c) for c in others}
+    leader_vp = max(ctx.opp_vp.values(), default=0)
+    my_base = economy.turns_to_win(cfg, ctx)
+
+    out = []
+    for m in moves:
+        hid = m.steps[0].robber_hex
+        if hid is None:
+            out.append(m)
+            continue
+        nxt = _after(cfg, m.steps)
+        cost_to_them = 0.0
+        for c in others:
+            if not any(
+                hid in board.VERTEX_HEXES[v]
+                for v in cfg.players[c].settlements + cfg.players[c].cities
+            ):
+                continue
+            # slowing the front-runner is worth more than slowing the last place
+            weight = 1.0 if ctx.opp_vp.get(c, 0) >= leader_vp else 0.6
+            setback = _clamp(_opponent_turns(nxt, c) - baseline[c], 0.0, ROBBER_CAP)
+            cost_to_them += weight * setback
+        # capped both ways: unblocking your own hex is as bounded a gain as
+        # blocking theirs is a loss
+        mine = _clamp(my_base - economy.turns_to_win(nxt, build_ctx(nxt)),
+                      -ROBBER_CAP, ROBBER_CAP)
+        steal = 0.35 if m.steps[0].steal_from else 0.0
+        out.append(m.model_copy(update={"score": round(cost_to_them + mine + steal, 2)}))
+    out.sort(key=lambda m: -m.score)
+    return out
 
 
 def solve(cfg: BoardConfig) -> list[ScoredMove]:
     ctx = build_ctx(cfg)
     if cfg.pending == "move_robber":
-        return _robber_moves(ctx)[:TOP_N]
+        return _score_robber(ctx, _robber_moves(ctx))[:TOP_N]
     if cfg.phase in ("setup1", "setup2"):
         return _setup_moves(ctx)
 
@@ -898,10 +1063,22 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     moves.extend(_dev_plays(ctx))
     moves.extend(_trade_combos(ctx))
     moves.extend(_build_chains(ctx, atomic))
+
+    # Everything above was generated with a heuristic score; that score chose
+    # *which* moves are worth considering, but it is not what ranks them.
+    base = economy.turns_to_win(cfg, ctx)
+    rescored = []
+    for m in moves:
+        if m.steps[0].type in ("play_knight", "move_robber"):
+            continue  # priced against the opponents below, not against us
+        rescored.append(m.model_copy(update={"score": round(_turns_saved(cfg, base, m), 2)}))
+    knights = _score_robber(ctx, [m for m in moves if m.steps[0].type == "play_knight"])
+    moves = rescored + knights
+
     moves.append(
         ScoredMove(
             steps=[MoveStep(type="end_turn")],
-            score=0.1,
+            score=0.0,
             reasoning="Nothing worth doing -- bank your cards and end the turn.",
             location_hint="end your turn",
         )

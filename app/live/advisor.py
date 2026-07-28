@@ -582,6 +582,25 @@ def robber_options(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[di
     return out
 
 
+def victory_plan(eng: GameEngine, cfg: BoardConfig) -> dict[str, Any]:
+    """The route to ten points, so a turn with no affordable move still says
+    something. "Nothing to do" and "nothing to aim for" are different answers."""
+    from .. import economy
+
+    ctx = solver.build_ctx(cfg)
+    steps = []
+    for s in economy.plan(cfg, ctx):
+        where = (
+            board.describe_vertex(cfg.hexes, s["vertex"]) if s["vertex"] is not None else ""
+        )
+        steps.append({**s, "where": where})
+    return {
+        "turns": round(economy.turns_to_win(cfg, ctx), 1),
+        "vp": ctx.my_vp,
+        "steps": steps,
+    }
+
+
 def recommend(eng: GameEngine) -> dict[str, Any]:
     cfg = eng.board_config()
     moves: list[ScoredMove] = solver.solve(cfg)
@@ -592,6 +611,7 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "bank_options": bank_options(eng, cfg),
         "proposals": trade_proposals(eng, cfg),
         "trade_history": trade_history(eng),
+        "plan": victory_plan(eng, cfg),
         "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),

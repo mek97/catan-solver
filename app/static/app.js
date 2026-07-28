@@ -588,7 +588,40 @@ function renderPanel(rec) {
   renderPrimary(rec, groups);
   renderActions(rec, groups);
   drawHint(state.heroMove);
+  renderPlan(rec);
   renderIntel(rec);
+}
+
+const PLAN_LABEL = {
+  settlement: "settle", city: "city", dev: "dev cards",
+  army: "largest army", longest_road: "longest road",
+};
+
+// The route to ten points. Worth its own line even on a turn where nothing is
+// affordable: "nothing to do" and "nothing to aim for" are different answers,
+// and only the second one is ever really true.
+function renderPlan(rec) {
+  const el = $("#plan");
+  const plan = rec?.plan;
+  if (!plan?.steps?.length) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  const need = 10 - plan.vp;
+  el.innerHTML =
+    `<div class="plan-head"><span>${plan.vp} VP · ${need} to go</span>` +
+    `<span class="plan-eta">~${plan.turns} turns</span></div>` +
+    plan.steps
+      .map(
+        (s) => `<div class="plan-step">
+          <span class="plan-at">t+${s.at}</span>
+          <span class="plan-kind">${PLAN_LABEL[s.kind] || s.kind}</span>
+          <span class="plan-vp">+${s.vp}</span>
+          <span class="plan-where">${s.where || ""}</span>
+        </div>`,
+      )
+      .join("");
 }
 
 function renderLog(events) {
