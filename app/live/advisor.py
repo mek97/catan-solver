@@ -300,24 +300,79 @@ def dev_card_plays(eng: GameEngine, cfg: BoardConfig) -> list[dict[str, Any]]:
     return out
 
 
+def _partners_for(eng: GameEngine, ctx, res: str, leader_vp: int) -> list[dict[str, Any]]:
+    """Opponents worth asking for a resource, best prospect first.
+
+    Ranked by how much of it they produce and how many cards they hold, minus
+    anyone at or past the leader's score -- helping them is how you lose.
+    """
+    production = eng.production_table()
+    out = []
+    for p in eng.player_summary():
+        color = p["color"]
+        if p["is_me"] or not p["cards"]:
+            continue
+        if ctx.opp_vp.get(color, 0) >= max(7, leader_vp):
+            continue
+        pips = sum(
+            amt
+            for by_number in production.get(color, {}).values()
+            for rname, amt in by_number.items()
+            if rname == res
+        )
+        out.append({"color": color, "pips": pips, "cards": p["cards"]})
+    out.sort(key=lambda c: (-c["pips"], -c["cards"], c["color"]))
+    return out
+
+
+def _choose_partner(
+    mem, candidates: list[dict[str, Any]], give: str, res: str, count: int, hand
+) -> Optional[dict[str, Any]]:
+    """Pick who to ask and at what price, given what has already been refused.
+
+    Refusals are the whole point of this function: asking green a third time
+    for the ore they have twice declined is worse than useless, so we walk on
+    to the next partner, and only when everyone has said no do we raise the
+    price.
+    """
+    give_n = max(1, count)
+    # Someone who has already handed this resource over is a better bet than
+    # whoever merely produces the most of it; someone who has refused it is a
+    # worse one. Production order survives as the tiebreak.
+    ranked = sorted(
+        candidates,
+        key=lambda c: (-mem.gives(c["color"], res), mem.refuses(c["color"], res)),
+    )
+
+    for cand in ranked:
+        if not mem.was_refused(cand["color"], [give] * give_n, [res] * count):
+            return {**cand, "give_n": give_n, "sweetened": False}
+
+    # everyone has turned this down -- the trade isn't dead, the price is.
+    # Offer one more card if we can spare it.
+    best = ranked[0]
+    if hand.get(give, 0) > give_n:
+        return {**best, "give_n": give_n + 1, "sweetened": True}
+    return None
+
+
 def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[dict[str, Any]]:
     """Concrete offers to make: who to ask, what to give, and why they'd agree.
 
-    Partner choice uses their production (who actually makes the resource) and
-    their hand size, and skips whoever is closest to winning.
+    Partner choice uses their production (who actually makes the resource),
+    their hand size, and what they have already refused.
     """
     ctx = solver.build_ctx(cfg)
     hand = cfg.me.hand
-    players = {p["color"]: p for p in eng.player_summary() if not p["is_me"]}
-    production = eng.production_table()
+    mem = eng.trade_memory
     leader_vp = max(ctx.opp_vp.values(), default=0)
 
     # what we're short of, for the most valuable build we can nearly afford
-    targets: list[tuple[int, str, dict[str, int]]] = []
-    for name in ("city", "settlement", "dev", "road"):
+    targets: list[tuple[int, int, str, dict[str, int]]] = []
+    for rank, name in enumerate(("city", "settlement", "dev", "road")):
         need = {r: n - hand.get(r, 0) for r, n in COSTS[name].items() if hand.get(r, 0) < n}
         if need:
-            targets.append((sum(need.values()), name, need))
+            targets.append((sum(need.values()), rank, name, need))
     targets.sort()
 
     spare = sorted(
@@ -325,44 +380,53 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
         key=lambda r: -(ctx.my_pips.get(r, 0.0) + hand.get(r, 0)),
     )
     out: list[dict[str, Any]] = []
-    for missing, build, need in targets:
+    seen: set[tuple] = set()
+    for missing, _rank, build, need in targets:
         if missing > 2:
             continue
         for res, count in need.items():
-            # who produces this, holds cards, and isn't running away with it
-            candidates = []
-            for color, p in players.items():
-                if ctx.opp_vp.get(color, 0) >= max(7, leader_vp):
-                    continue
-                pips = sum(
-                    amt for num, r in production.get(color, {}).items()
-                    for rname, amt in r.items() if rname == res
-                )
-                if p["cards"] > 0:
-                    candidates.append((pips, p["cards"], color))
-            candidates.sort(reverse=True)
-            if not candidates:
-                continue
-            pips, cards, color = candidates[0]
             give = next((r for r in spare if r != res), None)
             if not give:
                 continue
+            candidates = _partners_for(eng, ctx, res, leader_vp)
+            if not candidates:
+                continue
+            pick = _choose_partner(mem, candidates, give, res, count, hand)
+            if pick is None:
+                continue
+
+            color, give_n = pick["color"], pick["give_n"]
+            if (color, give, res, count) in seen:
+                continue  # the same ask, already listed against a better build
+            seen.add((color, give, res, count))
+            offer, want = {give: give_n}, {res: count}
             # score it the same way we score an incoming offer, so proposing a
             # trade competes with building instead of always sorting last
-            after = _hand_after(cfg, Counter({give: max(1, count)}), Counter({res: count}))
+            after = _hand_after(cfg, Counter(offer), Counter(want))
             gain = (_best_score(cfg, after) - _best_score(cfg, dict(hand))) if after else 0.0
+
+            why = (
+                f"they produce {pick['pips']} of it and hold {pick['cards']} cards"
+                if pick["pips"]
+                else f"they hold {pick['cards']} cards"
+            )
+            note = _history_note(mem, color, res)
+            if pick["sweetened"]:
+                why = f"everyone has refused 1-for-1, so sweeten it to {give_n} {give}"
+            elif note:
+                why = f"{why}; {note}"
+
             out.append(
                 {
                     "to": color,
-                    "give": {give: max(1, count)},
-                    "get": {res: count},
+                    "give": offer,
+                    "get": want,
                     "for": build,
                     "score": round(gain, 1),
+                    "sweetened": pick["sweetened"],
                     "text": (
-                        f"Ask {color} for {count} {res} — offer {give}. "
-                        f"It completes your {build}"
-                        + (f"; they produce {pips} of it and hold {cards} cards." if pips
-                           else f"; they hold {cards} cards.")
+                        f"Ask {color} for {count} {res} — offer {give_n} {give}. "
+                        f"It completes your {build}; {why}."
                     ),
                 }
             )
@@ -416,6 +480,19 @@ def bank_options(eng: GameEngine, cfg: BoardConfig, limit: int = 4) -> list[dict
             )
     out.sort(key=lambda o: -o["score"])
     return out[:limit]
+
+
+def _history_note(mem, partner: str, resource: str) -> str:
+    """One clause on how this player has handled this resource before."""
+    yes, no = mem.gives(partner, resource), mem.refuses(partner, resource)
+    if yes:
+        return f"they have given up {resource} {yes}x before"
+    return f"they have refused {resource} {no}x" if no else ""
+
+
+def trade_history(eng: GameEngine) -> dict[str, Any]:
+    """What has been refused and accepted so far, and what each player needs."""
+    return eng.trade_memory.summary() if eng is not None else {}
 
 
 def recent_trades(eng: GameEngine, limit: int = 8) -> list[dict[str, Any]]:
@@ -514,6 +591,7 @@ def recommend(eng: GameEngine) -> dict[str, Any]:
         "dev_plays": dev_card_plays(eng, cfg),
         "bank_options": bank_options(eng, cfg),
         "proposals": trade_proposals(eng, cfg),
+        "trade_history": trade_history(eng),
         "my_dev": eng.my_dev_cards(),
         "my_turn": eng.is_my_turn(),
         "turn": eng.current_turn(),

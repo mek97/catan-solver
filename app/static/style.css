@@ -316,6 +316,17 @@ main { display: flex; height: 100vh; }
 .pnum b { color: var(--dim); margin-right: 2px; }
 .pnum.hot b { color: var(--rob); }
 
+/* what a player has actually done at the trade table */
+.ptrade { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 5px;
+  padding-top: 5px; border-top: 1px dashed rgba(255,255,255,.08); }
+.tlbl { font: 600 9px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--faint); margin-right: 1px; }
+.tlbl:not(:first-child) { margin-left: 5px; }
+.tchip { font: 600 10px var(--mono); padding: 1px 4px; border-radius: 3px; }
+.tchip.yes { color: #8fc63f; background: rgba(143,198,63,.14); }
+.tchip.no { color: #d4705a; background: rgba(212,112,90,.14); }
+.tchip.want { color: var(--dim); background: rgba(255,255,255,.06); }
+
 #rolls { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
 .roll-chip { font: 600 10px var(--mono); padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,.07); color: var(--dim); }
 .roll-chip.seven { background: rgba(226,104,95,.25); color: #f0a49d; }

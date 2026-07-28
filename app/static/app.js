@@ -489,9 +489,32 @@ function renderActions(rec, groups) {
   }
 }
 
+// What a player has done at the trade table, as chips. This is the payoff of
+// recording responses: "green gives ore, orange never will" is worth more than
+// any production estimate, because it already happened.
+function tradeRead(hist, color) {
+  const rows = [
+    ["gives", hist.will_give?.[color], "yes"],
+    ["won't", hist.wont_give?.[color], "no"],
+    ["needs", hist.wants?.[color], "want"],
+  ];
+  const html = rows
+    .map(([label, counts, cls]) => {
+      const chips = Object.entries(counts || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([r, n]) => `<span class="tchip ${cls}">${RES_ABBR[r] || r}${n > 1 ? `×${n}` : ""}</span>`)
+        .join("");
+      return chips ? `<span class="tlbl">${label}</span>${chips}` : "";
+    })
+    .join("");
+  return html ? `<div class="ptrade">${html}</div>` : "";
+}
+
 function renderIntel(rec) {
   const players = $("#players");
   players.replaceChildren();
+  const hist = rec?.trade_history || {};
   (rec?.players || []).forEach((p) => {
     const card = document.createElement("div");
     card.className = `pcard${p.is_me ? " me" : ""}`;
@@ -511,7 +534,8 @@ function renderIntel(rec) {
       <div class="pstats">${p.settlements}s ${p.cities}c ${p.roads}r · ${p.cards} cards · ${p.dev_cards} dev${
         p.dev_used ? ` (${p.dev_used} played)` : ""}</div>
       <div class="chips">${chips}${unk || (known.length ? "" : '<span class="chip unk">—</span>')}</div>
-      ${prod ? `<div class="prod">${prod}</div>` : ""}`;
+      ${prod ? `<div class="prod">${prod}</div>` : ""}
+      ${p.is_me ? "" : tradeRead(hist, p.color)}`;
     players.appendChild(card);
   });
 

@@ -385,3 +385,187 @@ def test_bank_options_respect_an_empty_bank():
     cfg.bank = {"wood": 0, "brick": 0, "sheep": 19, "wheat": 0, "ore": 5}
     gets = {list(o["get"])[0] for o in bank_options(eng, cfg)}
     assert gets == {"ore"}, "only the pile with stock can be traded for"
+
+
+# --- trade rejections -------------------------------------------------------
+
+
+def _offer(oid, creator, offered, wanted, responses):
+    return {"id": oid, "creator": creator, "offeredResources": offered,
+            "wantedResources": wanted, "playerResponses": responses}
+
+
+def test_memory_records_who_refused_our_offer():
+    """A decline is only meaningful when we know which offer it answered."""
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    colour = {1: "red", 2: "blue", 3: "orange"}.get
+    # we are red, offering sheep(3) for ore(5); blue declines, orange accepts
+    mem.observe_offer(_offer("a", 1, [3], [5], {"2": 2, "3": 1}), me=1, colour=colour)
+
+    assert mem.was_refused("blue", ["sheep"], ["ore"]) == 1
+    assert mem.refuses("blue", "ore") == 1
+    assert mem.was_refused("orange", ["sheep"], ["ore"]) == 0
+    assert mem.accepted[("orange", ("sheep",), ("ore",))] == 1
+
+
+def test_repeated_frames_do_not_inflate_refusal_counts():
+    """An open offer is re-sent on every diff; it is still one refusal."""
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    colour = {1: "red", 2: "blue"}.get
+    for _ in range(5):
+        mem.observe_offer(_offer("a", 1, [3], [5], {"2": 2}), me=1, colour=colour)
+    assert mem.refuses("blue", "ore") == 1
+
+
+def test_opponent_offers_reveal_what_they_need():
+    """What they ask for is what they're short of; what they give is spare."""
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    colour = {1: "red", 2: "blue"}.get
+    mem.observe_offer(_offer("a", 2, [4], [1], {}), me=1, colour=colour)
+    assert mem.wants["blue"]["wood"] == 1
+    assert mem.spare["blue"]["wheat"] == 1
+
+
+def test_refused_trade_is_re_aimed_at_another_player():
+    from app.live.advisor import _choose_partner
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    cands = [{"color": "blue", "pips": 5, "cards": 6},
+             {"color": "orange", "pips": 2, "cards": 4}]
+    hand = {"sheep": 3}
+
+    assert _choose_partner(mem, cands, "sheep", "ore", 1, hand)["color"] == "blue"
+
+    mem.refused[("blue", ("sheep",), ("ore",))] = 1
+    mem.wont_give["blue"]["ore"] = 1
+    pick = _choose_partner(mem, cands, "sheep", "ore", 1, hand)
+    assert pick["color"] == "orange", "must move on to a partner who hasn't refused"
+    assert not pick["sweetened"]
+
+
+def test_when_everyone_refuses_the_price_goes_up():
+    from app.live.advisor import _choose_partner
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    cands = [{"color": "blue", "pips": 5, "cards": 6},
+             {"color": "orange", "pips": 2, "cards": 4}]
+    for c in ("blue", "orange"):
+        mem.refused[(c, ("sheep",), ("ore",))] = 1
+        mem.wont_give[c]["ore"] = 1
+
+    pick = _choose_partner(mem, cands, "sheep", "ore", 1, {"sheep": 3})
+    assert pick["sweetened"] and pick["give_n"] == 2
+
+    # ...but only if we can actually spare the extra card
+    assert _choose_partner(mem, cands, "sheep", "ore", 1, {"sheep": 1}) is None
+
+
+def test_engine_folds_a_response_onto_the_offer_it_answers():
+    """The offer and the response to it arrive in separate diffs.
+
+    colonist sends only changed fields, so the diff carrying a decline has no
+    creator and no resources on it -- the memory has to read the merged state
+    or it records a refusal of nothing.
+    """
+    eng = replay()
+    me = eng.my_color_id
+    other = next(c for c in (1, 2, 3, 4) if c != me)
+    mem = eng.trade_memory
+    before = mem.refuses(P.map_color(other), "ore")
+
+    eng.apply_diff({"tradeState": {"activeOffers": {
+        "z": _offer("z", me, [3], [5], {str(other): 0})}}})
+    assert mem.refuses(P.map_color(other), "ore") == before, "no response yet"
+
+    # second diff: just the response, detached from the offer
+    eng.apply_diff({"tradeState": {"activeOffers": {
+        "z": {"playerResponses": {str(other): 2}}}}})
+    assert mem.refuses(P.map_color(other), "ore") == before + 1
+    assert mem.refused_us(P.map_color(other), ["sheep"], ["ore"]) == 1
+
+
+def test_a_decline_of_anyones_offer_is_recorded():
+    """Whoever asked, a refusal prices the trade we are about to propose."""
+    eng = replay()
+    me = eng.my_color_id
+    a, b = [c for c in (1, 2, 3, 4) if c != me][:2]
+    mem = eng.trade_memory
+    # the recorded game already has trades in it, so measure the change
+    before = mem.refuses(P.map_color(b), "ore")
+    wanted_before = mem.wants[P.map_color(a)]["ore"]
+
+    eng.apply_diff({"tradeState": {"activeOffers": {
+        "q": _offer("q", a, [3], [5], {str(b): 2})}}})
+    assert mem.refuses(P.map_color(b), "ore") == before + 1
+    # ...but it was not us who was turned down
+    assert mem.refused_us(P.map_color(b), ["sheep"], ["ore"]) == 0
+    # and the asker revealed what they are short of
+    assert mem.wants[P.map_color(a)]["ore"] == wanted_before + 1
+
+
+def test_a_snapshot_is_recorded_inside_the_game_it_opens():
+    """The snapshot frame must land in its own game, or nothing replays.
+
+    Storing the frame before minting the game id filed every snapshot under
+    the *previous* game, which is why exported bundles rebuilt to nothing.
+    """
+    import base64
+    import msgpack
+
+    from app.live.export import replay_frames
+    from app.live.feed import LiveFeed
+    from app.live.store import Store
+
+    src = replay()
+    snapshot = {"data": {"type": P.MSG_GAME_SNAPSHOT, "payload": {
+        "gameState": src.state, "playerColor": src.my_color_id,
+        "playOrder": src.play_order, "playerUserStates": []}}}
+    diff = {"data": {"type": P.MSG_GAME_DIFF, "payload": {"diff": {"someState": {"a": 1}}}}}
+
+    def frame(obj):
+        return base64.b64encode(msgpack.packb(obj, use_bin_type=True)).decode()
+
+    feed = LiveFeed(store=Store(path=":memory:"))
+    feed.ingest(frame(snapshot), "in", 2)
+    game_id = feed.game_id
+    feed.ingest(frame(diff), "in", 2)
+
+    assert game_id, "a snapshot must open a game"
+    rebuilt = replay_frames(list(feed.store.replay_frames(game_id)))
+    assert rebuilt.state, "the snapshot must be replayable from its own game"
+    assert rebuilt.my_color_id == src.my_color_id
+
+
+def test_a_resync_continues_the_same_recording():
+    """Re-sending a snapshot mid-game must not split the game in two."""
+    import base64
+    import msgpack
+
+    from app.live.feed import LiveFeed
+    from app.live.store import Store
+
+    src = replay()
+    payload = {"gameState": src.state, "playerColor": src.my_color_id,
+               "playOrder": src.play_order, "playerUserStates": []}
+    blob = base64.b64encode(msgpack.packb(
+        {"data": {"type": P.MSG_GAME_SNAPSHOT, "payload": payload}}, use_bin_type=True)).decode()
+
+    feed = LiveFeed(store=Store(path=":memory:"))
+    feed.ingest(blob, "in", 2)
+    first = feed.game_id
+
+    # the resync snapshot differs only in the clock, so it is a distinct frame
+    # carrying the same game
+    again = base64.b64encode(msgpack.packb(
+        {"data": {"type": P.MSG_GAME_SNAPSHOT, "payload": {**payload, "timeLeftInState": 42}}},
+        use_bin_type=True)).decode()
+    feed.ingest(again, "in", 2)
+    assert feed.game_id == first, "a resync is the same game, so one recording"
