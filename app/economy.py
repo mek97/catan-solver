@@ -428,8 +428,27 @@ def _seed_spots(pos: _Position) -> _Position:
     return pos
 
 
+# The two coherent ways to win, which experts blend and greedy planners
+# zigzag between. Szita, Chaslot and Spronck found their agent preferred cities
+# and development cards while building far fewer settlements than a strong
+# human would, and that weighting its rollouts towards building *more* eagerly
+# made it play worse -- the failure was incoherence, not appetite. A plan that
+# commits is worth more than one that takes whatever is cheapest this rung and
+# arrives somewhere it did not intend.
+STRATEGIES = {
+    "cities": ("city", "dev", "army"),
+    "expand": ("settlement", "longest_road"),
+    "mixed": (),          # whatever is cheapest, the old behaviour
+}
+OFF_PLAN = 1.35           # what a rung outside the chosen plan is charged
+
+
 def _climb(
-    cfg: BoardConfig, ctx, record: bool = False, deadlines: Optional[dict] = None
+    cfg: BoardConfig,
+    ctx,
+    record: bool = False,
+    deadlines: Optional[dict] = None,
+    prefer: Optional[str] = None,
 ) -> tuple[float, list[dict]]:
     """Estimated turns to reach 10 victory points, and optionally the route.
 
@@ -459,6 +478,7 @@ def _climb(
             if deadlines and rung.kind in deadlines and total + t + 1.0 > deadlines[rung.kind]:
                 continue
             worth = min(rung.vp, rules.VICTORY_POINTS_TO_WIN - pos.vp)
+            on_plan = STRATEGIES.get(prefer or "mixed", ())
             # Soonest point first, most points breaking a tie. The obvious
             # alternative -- best turns-per-point -- will take a two-point
             # award with an eleven-turn wait over a city four turns away,
@@ -472,7 +492,8 @@ def _climb(
             # turns (the ratio rule: 12 of 80, at most 1.9). It matters because
             # a move's score is a difference of two of these, so the noise is
             # real -- it is just bounded, and biased the same way on both sides.
-            per_vp = (t + 1.0, -worth)
+            cost = (t + 1.0) * (1.0 if not on_plan or rung.kind in on_plan else OFF_PLAN)
+            per_vp = (cost, -worth)
             if best is None or per_vp < best[0]:
                 best = (per_vp, t, rung)
         if best is None:
@@ -493,20 +514,41 @@ def _climb(
     return min(total, LOST), route
 
 
-def turns_to_win(cfg: BoardConfig, ctx, deadlines: Optional[dict] = None) -> float:
+def turns_to_win(
+    cfg: BoardConfig, ctx, deadlines: Optional[dict] = None, prefer: Optional[str] = None
+) -> float:
     """Estimated turns to reach 10 victory points from this position.
 
     `deadlines` maps an exclusive award to when a rival is expected to take it;
-    past that moment it stops counting towards our ten.
+    past that moment it stops counting towards our ten. `prefer` names the plan
+    being followed, which charges rungs outside it a premium.
     """
-    return _climb(cfg, ctx, deadlines=deadlines)[0]
+    return _climb(cfg, ctx, deadlines=deadlines, prefer=prefer)[0]
 
 
-def plan(cfg: BoardConfig, ctx, deadlines: Optional[dict] = None) -> list[dict]:
+def best_strategy(
+    cfg: BoardConfig, ctx, deadlines: Optional[dict] = None
+) -> tuple[str, float]:
+    """Which coherent plan this position is closest to, and how long it takes.
+
+    Worked out once for the position rather than per candidate move: a single
+    build almost never changes which game you are playing, and asking three
+    times per move would triple the cost for an answer that does not move.
+    """
+    scored = [
+        (_climb(cfg, ctx, deadlines=deadlines, prefer=name)[0], name)
+        for name in STRATEGIES
+    ]
+    turns, name = min(scored)
+    return name, turns
+
+
+def plan(cfg: BoardConfig, ctx, deadlines: Optional[dict] = None,
+         prefer: Optional[str] = None) -> list[dict]:
     """The fastest route to 10 points we can see from here.
 
     Worth showing even when no move is affordable: "nothing to do this turn" is
     not the same as "nothing to aim for", and at nine points holding two cards
     the second is the only thing the player actually wants to know.
     """
-    return _climb(cfg, ctx, record=True, deadlines=deadlines)[1]
+    return _climb(cfg, ctx, record=True, deadlines=deadlines, prefer=prefer)[1]

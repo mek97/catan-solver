@@ -348,6 +348,8 @@ main { display: flex; height: 100vh; }
 .plan-vp { color: #8fc63f; }
 .plan-where { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.plan-strat { color: #c4b5fd; font-weight: 600; }
+
 /* every player's clock, so our own plan is read against the field */
 .plan-race { display: flex; gap: 8px; margin: 0 0 7px; padding-bottom: 6px;
   border-bottom: 1px dashed rgba(255,255,255,.08); }

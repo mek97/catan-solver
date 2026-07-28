@@ -1294,6 +1294,13 @@ def _opponent_turns(cfg: BoardConfig, color: str) -> float:
     return economy.turns_to_win(view, build_ctx(view))
 
 
+# race() walks every player's ladder twice and is asked for by solve(), the
+# robber panel and the plan panel -- three or four times for one position, for
+# an answer that cannot have changed in between. One entry is enough: the cfg
+# is held alongside it so a recycled id cannot masquerade as a hit.
+_RACE_CACHE: dict[int, tuple[Any, dict]] = {}
+
+
 def race(cfg: BoardConfig) -> dict[str, Any]:
     """Everyone's clock and everyone's route, with the awards shared out once.
 
@@ -1311,6 +1318,10 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
     turns three identical road plans into the cities and knights the table is
     actually building.
     """
+    hit = _RACE_CACHE.get(id(cfg))
+    if hit is not None and hit[0] is cfg:
+        return hit[1]
+
     views = {}
     for color in cfg.players:
         view = cfg.model_copy(deep=True)
@@ -1346,7 +1357,7 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
     mine = turns.get(cfg.me.color, economy.LOST)
     rivals = {c: t for c, t in turns.items() if c != cfg.me.color}
     leader = min(rivals, key=lambda c: rivals[c], default=None)
-    return {
+    out = {
         "turns": turns,
         "plans": plans,
         # what we may not count on, because somebody else gets there first
@@ -1357,6 +1368,9 @@ def race(cfg: BoardConfig) -> dict[str, Any]:
         "leader_turns": rivals.get(leader, economy.LOST) if leader else economy.LOST,
         "behind": mine - rivals[leader] if leader else 0.0,
     }
+    _RACE_CACHE.clear()
+    _RACE_CACHE[id(cfg)] = (cfg, out)
+    return out
 
 
 def _denial_weight(behind: float) -> float:
@@ -1509,14 +1523,19 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
     weight, leader = _denial_weight(contest["behind"]), contest["leader"]
     # an award a rival takes first is not ours to plan around
     due = contest["deadlines"]
-    base = economy.turns_to_win(cfg, ctx, deadlines=due)
+    # Which game we are playing, decided once for the position. Every candidate
+    # is then judged against the same plan, so a move is worth what it does for
+    # the strategy rather than what the greedy next rung happens to want.
+    plan_name, base = economy.best_strategy(cfg, ctx, deadlines=due)
     dev_worth = _dev_card_value(ctx, base, due)
 
     def priced(candidates: list[ScoredMove]) -> list[ScoredMove]:
         out = []
         for m in candidates:
             nxt = _after(cfg, m.steps)
-            gain = base - economy.turns_to_win(nxt, build_ctx(nxt), deadlines=due)
+            gain = base - economy.turns_to_win(
+                nxt, build_ctx(nxt), deadlines=due, prefer=plan_name
+            )
             # Taking a corner can cost the leader more than it saves us, and
             # measuring only our own clock made those moves look like losses.
             # Only placements are checked: nothing else we build reaches them.

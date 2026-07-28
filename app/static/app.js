@@ -705,7 +705,10 @@ function renderPlan(rec) {
         .join("") + `</div>`
     : "";
   el.innerHTML =
-    `<div class="plan-head"><span>${plan.vp} VP · ${need} to go</span>` +
+    `<div class="plan-head"><span>${plan.vp} VP · ${need} to go` +
+    (plan.strategy ? ` · <b class="plan-strat">${
+      {cities: "cities & cards", expand: "settle & expand", mixed: "mixed"}[plan.strategy]
+      || plan.strategy}</b>` : "") + `</span>` +
     `<span class="plan-eta">~${plan.turns} turns</span></div>` + clocks +
     plan.steps
       .map(

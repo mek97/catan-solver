@@ -636,15 +636,17 @@ def victory_plan(eng: GameEngine, cfg: BoardConfig) -> dict[str, Any]:
     something. "Nothing to do" and "nothing to aim for" are different answers."""
     ctx = solver.build_ctx(cfg)
     due = solver.race(cfg)["deadlines"]
+    plan_name, turns = economy.best_strategy(cfg, ctx, deadlines=due)
     steps = []
-    for s in economy.plan(cfg, ctx, deadlines=due):
+    for s in economy.plan(cfg, ctx, deadlines=due, prefer=plan_name):
         where = (
             board.describe_vertex(cfg.hexes, s["vertex"]) if s["vertex"] is not None else ""
         )
         steps.append({**s, "where": where})
     return {
-        "turns": round(economy.turns_to_win(cfg, ctx, deadlines=due), 1),
+        "turns": round(turns, 1),
         "vp": ctx.my_vp,
+        "strategy": plan_name,
         "steps": steps,
     }
 

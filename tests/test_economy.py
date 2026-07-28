@@ -469,3 +469,39 @@ def test_free_resources_rarely_make_the_estimate_worse():
 
     assert len(worse) <= 6, f"{len(worse)}/25 probes went backwards"
     assert max(worse, default=0) <= 3.0, "and never by more than a few turns"
+
+
+def test_a_plan_that_commits_beats_taking_whatever_is_cheapest():
+    """Szita, Chaslot and Spronck found their agent zigzagged: it preferred
+    cities and cards while building far fewer settlements than a strong human,
+    and weighting its rollouts to build more eagerly made it play *worse*. The
+    failure was incoherence. Choosing among coherent plans and keeping the best
+    can only improve on the greedy one, since greedy is among them."""
+    cfg = load(phase="main")
+    for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+        _settle(cfg, color, v)
+    ctx = solver.build_ctx(cfg)
+
+    greedy = economy.turns_to_win(cfg, ctx, prefer="mixed")
+    name, best = economy.best_strategy(cfg, ctx)
+    assert best <= greedy + 1e-9, "the minimum over plans includes the greedy one"
+    assert name in economy.STRATEGIES
+
+
+def test_the_plans_actually_disagree_somewhere():
+    """If every plan gave the same answer on every board there would be nothing
+    to choose between them. Not every position offers a real choice, so this
+    asks that some do."""
+    disagreed = 0
+    for hand in ({"ore": 3, "wheat": 2}, {"wood": 4, "brick": 4}, {},
+                 {"sheep": 3, "wheat": 3, "ore": 3}):
+        cfg = load(phase="main")
+        for color, v in zip(cfg.players, _spread(cfg, len(cfg.players))):
+            _settle(cfg, color, v)
+        cfg.me.hand = dict(hand)
+        ctx = solver.build_ctx(cfg)
+        answers = {round(economy.turns_to_win(cfg, ctx, prefer=n), 1)
+                   for n in economy.STRATEGIES}
+        if len(answers) > 1:
+            disagreed += 1
+    assert disagreed, "the plans are indistinguishable on every board tried"
