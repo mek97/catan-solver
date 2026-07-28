@@ -569,3 +569,89 @@ def test_a_resync_continues_the_same_recording():
         use_bin_type=True)).decode()
     feed.ingest(again, "in", 2)
     assert feed.game_id == first, "a resync is the same game, so one recording"
+
+
+# --- what you may offer -----------------------------------------------------
+
+
+class _Table:
+    """Three opponents holding cards, and no trade history."""
+
+    from app.live.trades import TradeMemory
+
+    def __init__(self):
+        self.trade_memory = self.TradeMemory()
+
+    def production_table(self):
+        return {}
+
+    def player_summary(self):
+        return [{"color": "red", "is_me": True, "cards": 1}] + [
+            {"color": c, "is_me": False, "cards": 5}
+            for c in ("blue", "orange", "green")
+        ]
+
+
+def _one_settlement(hand):
+    from app import solver
+    from test_solver import load
+
+    cfg = load(phase="main")
+    v = max(
+        range(54),
+        key=lambda x: sum(
+            solver.PIPS.get(cfg.hexes[h].number, 0)
+            for h in board.VERTEX_HEXES[x]
+            if cfg.hexes[h].number
+        ),
+    )
+    cfg.players["red"].settlements = [v]
+    cfg.players["red"].roads = [board.VERTEX_EDGES[v][0]]
+    cfg.me.hand = dict(hand)
+    return cfg
+
+
+def test_never_offer_a_card_the_build_itself_needs():
+    """Reported from a live game: holding one brick, it offered the brick.
+
+    A road costs a wood and a brick. Trading away your only brick to get the
+    wood leaves you holding a wood and still unable to build -- strictly worse
+    than doing nothing, and it was the headline suggestion.
+    """
+    from app.live.advisor import trade_proposals
+
+    props = trade_proposals(_Table(), _one_settlement({"brick": 1}))
+    assert props == [], "with nothing spare there is nothing to offer"
+
+
+def test_offer_what_is_left_over_once_the_build_is_paid_for():
+    from app.live.advisor import trade_proposals
+
+    props = trade_proposals(_Table(), _one_settlement({"brick": 1, "sheep": 3}))
+    road = next(p for p in props if p["for"] == "road")
+    assert road["give"] == {"sheep": 1}, "the brick is spoken for; the sheep are not"
+    assert road["get"] == {"wood": 1}
+    assert "completes your road" in road["text"]
+
+
+def test_do_not_claim_one_trade_finishes_a_build_two_cards_short():
+    from app.live.advisor import trade_proposals
+
+    props = trade_proposals(_Table(), _one_settlement({"brick": 1, "sheep": 3}))
+    settlement = next(p for p in props if p["for"] == "settlement")
+    assert "completes" not in settlement["text"]
+    assert "2 cards" in settlement["text"]
+
+
+def test_sweetening_cannot_spend_cards_the_build_needs():
+    """Raising the price is still limited by what is genuinely spare."""
+    from app.live.advisor import _choose_partner
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    cands = [{"color": "blue", "pips": 4, "cards": 5}]
+    mem.refused[("blue", ("sheep",), ("wood",))] = 1
+    mem.wont_give["blue"]["wood"] = 1
+    assert _choose_partner(mem, cands, "sheep", "wood", 1, {"sheep": 1}) is None
+    pick = _choose_partner(mem, cands, "sheep", "wood", 1, {"sheep": 2})
+    assert pick["give_n"] == 2 and pick["sweetened"]

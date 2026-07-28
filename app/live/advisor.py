@@ -326,7 +326,7 @@ def _partners_for(eng: GameEngine, ctx, res: str, leader_vp: int) -> list[dict[s
 
 
 def _choose_partner(
-    mem, candidates: list[dict[str, Any]], give: str, res: str, count: int, hand
+    mem, candidates: list[dict[str, Any]], give: str, res: str, count: int, surplus
 ) -> Optional[dict[str, Any]]:
     """Pick who to ask and at what price, given what has already been refused.
 
@@ -351,7 +351,7 @@ def _choose_partner(
     # everyone has turned this down -- the trade isn't dead, the price is.
     # Offer one more card if we can spare it.
     best = ranked[0]
-    if hand.get(give, 0) > give_n:
+    if surplus.get(give, 0) > give_n:
         return {**best, "give_n": give_n + 1, "sweetened": True}
     return None
 
@@ -375,15 +375,21 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
             targets.append((sum(need.values()), rank, name, need))
     targets.sort()
 
-    spare = sorted(
-        (r for r in RESOURCES if hand.get(r, 0) > 0),
-        key=lambda r: -(ctx.my_pips.get(r, 0.0) + hand.get(r, 0)),
-    )
     out: list[dict[str, Any]] = []
     seen: set[tuple] = set()
     for missing, _rank, build, need in targets:
         if missing > 2:
             continue
+        # Spare means spare *after* the build we are funding. Anything the
+        # build itself needs is not ours to trade away: offering your only
+        # brick to get the wood for a road leaves you holding the wood and
+        # unable to build the road, which is worse than doing nothing.
+        cost = COSTS[build]
+        surplus = {r: hand.get(r, 0) - cost.get(r, 0) for r in RESOURCES}
+        spare = sorted(
+            (r for r in RESOURCES if surplus[r] > 0),
+            key=lambda r: -(ctx.my_pips.get(r, 0.0) + hand.get(r, 0)),
+        )
         for res, count in need.items():
             give = next((r for r in spare if r != res), None)
             if not give:
@@ -391,7 +397,7 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
             candidates = _partners_for(eng, ctx, res, leader_vp)
             if not candidates:
                 continue
-            pick = _choose_partner(mem, candidates, give, res, count, hand)
+            pick = _choose_partner(mem, candidates, give, res, count, surplus)
             if pick is None:
                 continue
 
@@ -426,7 +432,14 @@ def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[d
                     "sweetened": pick["sweetened"],
                     "text": (
                         f"Ask {color} for {count} {res} — offer {give_n} {give}. "
-                        f"It completes your {build}; {why}."
+                        # only claim completion when this really is the last
+                        # card missing; two short is two trades away
+                        + (
+                            f"It completes your {build}"
+                            if missing <= count
+                            else f"It is one of the {missing} cards your {build} still needs"
+                        )
+                        + f"; {why}."
                     ),
                 }
             )
