@@ -72,8 +72,18 @@ CREATE INDEX IF NOT EXISTS snapshots_game ON snapshots(game_id, id);
 """
 
 
-_ROBBER_KINDS = {"robber_moved", "robber_placed"}
-_STEAL_KINDS = {"card_stolen", "card_stolen_blind"}
+# A steal is written into the log once per player who may read it, each
+# rendering numbered, and only ours is sent. Every hole left in the sequence
+# after reading the snapshot's history turned out to sit beside one of these:
+#   robber_moved -> [?] -> log_15        8x
+#   log_15       -> [?] -> turn_ended    7x
+#   card_stolen  -> [?] -> piece_bought  4x
+# log_15 carries a playerColor and a cardEnum -- the identity of the card, in
+# the view belonging to whoever is entitled to see it. It is left unnamed
+# because that reading is inference, not something colonist told us.
+_PRIVATE_NEIGHBOURS = {
+    "robber_moved", "robber_placed", "card_stolen", "card_stolen_blind", "log_15",
+}
 
 
 class Store:
@@ -178,12 +188,16 @@ class Store:
     def gaps(self, game_id: str) -> list[int]:
         """Log ids we never accounted for -- a sign we actually lost events.
 
-        Not every missing id is a loss. colonist numbers entries it never sends
-        us: the private half of a steal, which the thief and victim can read and
-        a spectator cannot. Those show up as a two-id hole sitting between a
-        robber move and the steal it caused, every time, and they made up the
-        large majority of what this used to report -- so the warning fired
-        constantly while nothing was wrong, which is worse than not warning.
+        Not every missing id is a loss, and on this recording none of them were.
+        colonist numbers entries it never sends us -- a steal is written once
+        per player entitled to read it, and only our copy arrives -- so holes
+        appear beside every steal. Reported literally, the warning fired
+        constantly while nothing was wrong, which is worse than not warning at
+        all.
+
+        A reconnect does not cause loss either: the snapshot that follows one
+        carries the log from id 0, so anything missed during the outage is
+        recovered when the socket comes back.
         """
         with self._lock:
             rows = self._conn.execute(
@@ -201,7 +215,7 @@ class Store:
         # a hole bracketed by a robber move and a steal is the withheld card
         private: set[int] = set()
         for (a, ka), (b, kb) in zip(seen, seen[1:]):
-            if b - a > 1 and ka in _ROBBER_KINDS and kb in _STEAL_KINDS:
+            if b - a > 1 and (ka in _PRIVATE_NEIGHBOURS or kb in _PRIVATE_NEIGHBOURS):
                 private.update(range(a + 1, b))
         return [i for i in missing if i not in private]
 

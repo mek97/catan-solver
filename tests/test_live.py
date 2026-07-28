@@ -807,3 +807,22 @@ def test_a_refresh_repairs_a_log_with_holes_in_it():
     eng.apply_snapshot(snap(full))     # the tab reloads
     assert len(eng.events) == 12
     assert len({e["log_id"] for e in eng.events}) == 12, "and nothing arrives twice"
+
+
+def test_the_gap_warning_does_not_fire_on_what_colonist_withholds():
+    """A steal is logged once per player entitled to read it, each numbered,
+    and only our copy arrives. Reported literally the warning fires on every
+    steal in the game, which teaches you to ignore it."""
+    from app.live.store import Store as _Store
+
+    st = _Store(path=":memory:")
+    st.start_game("g", "", "red", [1, 2], {})
+    for lid, kind in ((1, "dice_rolled"), (2, "robber_moved"), (5, "card_stolen"),
+                      (6, "turn_ended")):
+        st.add_event("g", lid, None, kind, "red", {})
+    assert st.gaps("g") == [], "3 and 4 are the steal colonist kept to itself"
+
+    st.start_game("h", "", "red", [1, 2], {})
+    for lid, kind in ((1, "dice_rolled"), (4, "dice_rolled")):
+        st.add_event("h", lid, None, kind, "red", {})
+    assert st.gaps("h") == [2, 3], "a hole between two ordinary events is a loss"
