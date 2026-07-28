@@ -570,6 +570,12 @@ class GameEngine:
             pending = "discard"
         elif action == P.ACTION_MOVE_ROBBER and self.is_my_turn():
             pending = "move_robber"
+        elif action in P.ACTION_ROAD_BUILDING and self.is_my_turn():
+            # Road Building's two free placements. Without this the advice
+            # vanishes the moment the card is played: the card leaves the hand,
+            # so the move that showed where the roads go stops being generated,
+            # exactly when the player is being asked to place them.
+            pending = "place_road"
         elif phase == "main" and self.is_my_turn() and not self.dice_thrown():
             # nothing is buildable until the dice are thrown; a knight is the
             # one thing you may play first, and often should

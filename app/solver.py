@@ -1027,22 +1027,54 @@ def _setup_moves(ctx: Ctx) -> list[ScoredMove]:
     return scored[:TOP_N]
 
 
-def _pre_roll_moves(ctx: Ctx) -> list[ScoredMove]:
-    """Before the dice, a knight is the only card you may play -- and the only
-    moment it can save you anything.
+def _free_road_moves(ctx: Ctx) -> list[ScoredMove]:
+    """Where to put a road you are not paying for.
 
-    Playing it after the roll cannot stop the 7 that has already happened. If
-    the robber is sitting on your own best hex, moving it first means the roll
-    pays you; that is worth more than the same knight played later, and it is
-    the one decision this phase actually contains.
+    Road Building, mid-placement. The cards are already spent, so these are
+    ranked on what the road opens rather than what it costs -- which is also
+    why they cannot be priced by the usual difference: paying nothing, every
+    one of them would score the same.
     """
     cfg = ctx.cfg
-    knights: list[ScoredMove] = []
-    if not cfg.me.dev_card_played_this_turn and cfg.me.dev_cards.knight >= 1:
-        knights = _score_robber(ctx, _robber_moves(ctx, step_type="play_knight"))
+    base = economy.turns_to_win(cfg, ctx)
+    out = []
+    for eid in _legal_road_edges(ctx):
+        nxt = cfg.model_copy(deep=True)
+        me = nxt.players[nxt.me.color]
+        me.roads.append(eid)
+        me.longest_road_len = None
+        gain = base - economy.turns_to_win(nxt, build_ctx(nxt))
+        out.append(
+            ScoredMove(
+                steps=[MoveStep(type="build_road", edge=eid)],
+                score=round(gain, 2),
+                reasoning=_road_move(ctx, eid).reasoning,
+                location_hint=f"free road on the {board.describe_edge(cfg.hexes, eid)}",
+            )
+        )
+    out.sort(key=lambda m: -m.score)
+    return out[:TOP_N]
+
+
+def _pre_roll_moves(ctx: Ctx) -> list[ScoredMove]:
+    """What you may do before the dice: any one development card, or roll.
+
+    The rule is that a card may be played at any point in your turn, the roll
+    included -- not that a knight is special. Offering only knights here left a
+    player holding Road Building with nothing to do but roll, which reads as
+    the app saying the card cannot be played at all.
+
+    A knight is still the card with a reason to go first: played afterwards it
+    cannot undo the 7 that has already happened, and if the robber is sitting
+    on your own best hex, moving it before the roll is what makes the roll pay.
+    """
+    cfg = ctx.cfg
+    plays = _dev_plays(ctx)
+    knights = _score_robber(ctx, [m for m in plays if m.steps[0].type == "play_knight"])
+    others = [m for m in plays if m.steps[0].type != "play_knight"]
     # every hex is a knight placement, so the list is long enough to push the
     # roll off the end -- and rolling is what happens on almost every turn
-    out: list[ScoredMove] = knights[: TOP_N - 1]
+    out: list[ScoredMove] = (knights + others)[: TOP_N - 1]
     blocked = any(
         cfg.robber_hex in board.VERTEX_HEXES[v]
         for v in ctx.my_buildings
@@ -1312,6 +1344,8 @@ def solve(cfg: BoardConfig) -> list[ScoredMove]:
         return _setup_moves(ctx)
     if cfg.pending == "roll":
         return _pre_roll_moves(ctx)
+    if cfg.pending == "place_road":
+        return _free_road_moves(ctx)
 
     # Two stages, and the order between them matters. Generation scores in
     # weighted pips: good enough to decide what is worth considering, and to

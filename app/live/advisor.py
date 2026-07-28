@@ -323,7 +323,7 @@ def _choose_partner(
     to the next partner, and only when everyone has said no do we raise the
     price.
     """
-    give_n = max(1, count)
+    base = max(1, count)
     # Someone who has already handed this resource over is a better bet than
     # whoever merely produces the most of it; someone who has refused it is a
     # worse one. Production order survives as the tiebreak.
@@ -332,16 +332,16 @@ def _choose_partner(
         key=lambda c: (-mem.gives(c["color"], res), mem.refuses(c["color"], res)),
     )
 
-    for cand in ranked:
-        if not mem.was_refused(cand["color"], [give] * give_n, [res] * count):
-            return {**cand, "give_n": give_n, "sweetened": False}
-
-    # everyone has turned this down -- the trade isn't dead, the price is.
-    # Offer one more card if we can spare it.
-    best = ranked[0]
-    if surplus.get(give, 0) > give_n:
-        return {**best, "give_n": give_n + 1, "sweetened": True}
-    return None
+    # Every price we can afford, cheapest first, and for each the partner most
+    # likely to agree. Raising the price used to skip this check, so an offer
+    # that had already been refused at the higher price was made again, and
+    # again -- the same trade going round in a loop while the memory that was
+    # supposed to prevent it recorded another refusal each time.
+    for price in range(base, int(surplus.get(give, 0)) + 1):
+        for cand in ranked:
+            if not mem.was_refused(cand["color"], [give] * price, [res] * count):
+                return {**cand, "give_n": price, "sweetened": price > base}
+    return None  # every partner has refused every price we can afford
 
 
 def trade_proposals(eng: GameEngine, cfg: BoardConfig, limit: int = 3) -> list[dict[str, Any]]:

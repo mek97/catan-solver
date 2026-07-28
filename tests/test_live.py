@@ -882,3 +882,34 @@ def test_the_tracker_never_claims_more_cards_than_a_player_holds():
         assert sum(p["hand"]["known"].values()) <= p["cards"], (
             f"{p['color']}: claims to know more than it holds"
         )
+
+
+def test_a_refused_price_is_not_offered_again():
+    """Reported live: the same trade going round in a loop.
+
+    Raising the price skipped the refusal check, so an offer already declined
+    at the higher price was made again -- and the memory meant to prevent that
+    just recorded another refusal each time round.
+    """
+    from app.live.advisor import _choose_partner
+    from app.live.trades import TradeMemory
+
+    mem = TradeMemory()
+    cands = [{"color": "blue", "pips": 4, "cards": 6}]
+    surplus = {"sheep": 3}
+
+    first = _choose_partner(mem, cands, "sheep", "ore", 1, surplus)
+    assert first["give_n"] == 1
+
+    mem.refused[("blue", ("sheep",), ("ore",))] = 1        # they said no
+    second = _choose_partner(mem, cands, "sheep", "ore", 1, surplus)
+    assert second["give_n"] == 2, "sweeten it"
+
+    mem.refused[("blue", ("sheep", "sheep"), ("ore",))] = 1  # no again
+    third = _choose_partner(mem, cands, "sheep", "ore", 1, surplus)
+    assert third["give_n"] == 3, "sweeten further while we can spare it"
+
+    mem.refused[("blue", ("sheep",) * 3, ("ore",))] = 1      # and again
+    assert _choose_partner(mem, cands, "sheep", "ore", 1, surplus) is None, (
+        "out of prices we can afford -- stop asking"
+    )
