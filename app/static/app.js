@@ -522,13 +522,16 @@ function renderTrades(rec) {
   const box = $("#trades");
   const proposals = rec?.proposals || [];
   const log = (rec?.trade_log || []).slice().reverse();   // newest first
-  $("#trades-sub").textContent = proposals.length
-    ? `${proposals.length} to make` : "";
+  const positive = proposals.filter((p) => (p.score ?? 0) > 0).length;
+  $("#trades-sub").textContent = positive ? `${positive} to make` : "";
 
   const spread = (obj) => Object.entries(obj || {}).flatMap(([r, n]) => Array(n).fill(r));
 
+  // the same rule as the hero: a proposal that costs you turns is listed, but
+  // it is not called worth proposing
+  const worth = proposals.filter((p) => (p.score ?? 0) > 0).length;
   const ask = proposals.map((p) => `
-    <div class="trow ask">
+    <div class="trow ask${(p.score ?? 0) > 0 ? "" : " costly"}">
       <span class="tw ${p.to || ""}">ask ${p.to || "?"}</span>
       <div class="tswap">
         ${cardRow(spread(p.give), "want")}
@@ -563,8 +566,11 @@ function renderTrades(rec) {
     </div>`;
   }).join("");
 
+  const askHead = worth
+    ? `worth proposing${worth < proposals.length ? ` · ${proposals.length - worth} costly` : ""}`
+    : "none of these pay off — best of a bad list";
   box.innerHTML =
-    (ask ? `<div class="tgroup"><h4>worth proposing</h4>${ask}</div>` : "") +
+    (ask ? `<div class="tgroup"><h4${worth ? "" : ' class="warn"'}>${askHead}</h4>${ask}</div>` : "") +
     (done ? `<div class="tgroup"><h4>at the table</h4>${done}</div>` : "") ||
     '<div class="tempty">no trades yet</div>';
 }
@@ -680,20 +686,52 @@ function bestOverall(groups) {
   return best;
 }
 
+/* Some actions you have to take whatever they cost: the robber has to move,
+   a 7 has to be discarded to, an opening settlement has to go down. Those are
+   the only cases where the least-bad option is still the answer. */
+const FORCED_STEPS = new Set(["setup_settlement", "setup_road", "move_robber"]);
+
+function mustAct(rec, item) {
+  if (rec?.discard?.required) return true;
+  // `roll` is pending too, but rolling is not a choice between actions --
+  // it has its own prompt and nothing else can happen until it is done
+  if (rec?.pending && rec.pending !== "roll") return true;
+  const first = item?.move?.steps?.[0]?.type;
+  return first ? FORCED_STEPS.has(first) : false;
+}
+
 function renderPrimary(rec, groups) {
   const box = $("#primary");
   const best = bestOverall(groups);
   const pass = rec?.moves?.find((m) => m.steps[0].type === "end_turn");
+  const idle = (why) => {
+    box.innerHTML = `<div class="hero hero-pass" style="--cat:var(--dim)">
+        <div class="hero-top"><span class="hero-cat">${rec?.my_turn ? "pass" : "hold"}</span></div>
+        <div class="hero-act">${rec?.my_turn ? "end your turn" : "nothing worth doing"}</div>
+        <div class="hero-why"></div>
+      </div>`;
+    box.querySelector(".hero-why").textContent = why;
+    state.heroMove = null;
+  };
 
   if (!best) {
-    box.innerHTML = pass
-      ? `<div class="hero" style="--cat:var(--dim)">
-           <div class="hero-top"><span class="hero-cat">pass</span></div>
-           <div class="hero-act">end your turn</div>
-           <div class="hero-why">Nothing available — bank your cards.</div>
-         </div>`
-      : `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
-    state.heroMove = null;
+    if (pass || rec) idle("Nothing available — bank your cards.");
+    else box.innerHTML = `<div class="hero"><div class="hero-empty">No recommendation yet.</div></div>`;
+    return;
+  }
+
+  // A score is turns taken off your clock, so a negative one is a move that
+  // sets you back. Showing the highest score regardless of sign meant the
+  // panel would confidently recommend a trade at -1.3 -- the least-bad of a
+  // bad list presented exactly like a good move. When nothing available pays
+  // for itself and nothing forces your hand, the answer is to do nothing, and
+  // the least-bad option is reported as what it is.
+  if ((best.item.score ?? 0) <= 0 && !mustAct(rec, best.item)) {
+    const cost = Math.abs(best.item.score ?? 0).toFixed(1);
+    idle(
+      `Nothing pays for itself right now. Closest is ${best.cat.name.toLowerCase()}: ` +
+      `${best.item.text} — and that costs you ${cost} turns.`
+    );
     return;
   }
 

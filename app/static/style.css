@@ -350,6 +350,11 @@ main { display: flex; height: calc(100vh - var(--dock-h)); }
 }
 .trow.mine { border-color: rgba(240,180,41,.35); }
 .trow.ask { border-left: 2px solid var(--deal); }
+/* a trade that costs you turns: shown, because it is still the best on offer,
+   but never dressed up as a good one */
+.trow.ask.costly { border-left-color: var(--faint); opacity: .6; }
+.trow.ask.costly .ts { color: var(--rob); }
+.tgroup h4.warn { color: var(--rob); }
 .tswap { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .tw {
   min-width: 66px; font: 700 10px var(--disp); letter-spacing: .06em;
@@ -403,6 +408,8 @@ main { display: flex; height: calc(100vh - var(--dock-h)); }
 }
 .hero-score { margin-left: auto; font: 600 11px var(--mono); color: var(--faint); }
 .hero-act { font: 700 20px/1.28 var(--disp); margin: 7px 0 6px; letter-spacing: .01em; }
+/* doing nothing is a real answer, and it should not shout like a good move */
+.hero-pass .hero-act { font-size: 17px; color: var(--dim); }
 .hero-why { color: var(--dim); font: 400 12px/1.5 var(--mono); }
 .hero-empty { color: var(--faint); font: 400 13px var(--mono); padding: 4px 0; }
 
