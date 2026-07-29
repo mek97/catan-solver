@@ -472,6 +472,25 @@ def _climb(
     everything after it. Greedy is not optimal, but it is stable, which matters
     more here: the score of a move is a *difference* between two of these, so a
     consistent bias on both sides cancels out.
+
+    Searching this instead has been tried, and it does not help. Replacing the
+    greedy pick with a depth-limited search over rung orderings -- alpha-beta
+    cut-offs and all -- was measured against greedy on the same 27 recorded
+    positions: agreement with catanatron went 6 -> 7, and the number of
+    positions where we sit still went 6 -> 7. Five times the latency to be
+    marginally more passive. It changed nothing because the thing it searches
+    is not where the error is.
+
+    A road is not a rung. Its cost is folded into the settlement rung it
+    reaches (see `_rungs`), so laying one now and laying it later cost the same,
+    and a road on its own scores *exactly* +0.00 -- not negative, zero. No
+    reordering of rungs can change that, because the road was never one of the
+    things being ordered.
+
+    What the model is missing is the reason to lay a road early: that the
+    corner it reaches is contested and will not wait. `_Position` already
+    carries `rivals` -- vertex -> roads the nearest opponent needs -- and
+    nothing reads it when pricing. That is where the next attempt belongs.
     """
     pos = _seed_spots(_build_position(cfg, ctx))
     total = 0.0
